@@ -9,6 +9,7 @@ from src.journal_gateway_client import JournalGatewayClient, JournalGatewayError
 from src.mt5_account import MT5BridgeError, MT5ConfigError, MT5ConnectionError, MT5UnavailableError, config_from_mapping
 from src.mt5_history import MT5HistoryError
 from src.outcome_tracker import sync_trade_outcomes
+from src.price_units import mt5_price_to_plan, price_factor_to_mt5
 from src.style import apply_style, context_strip, definition, metric_card, page_header, section_line
 from src.trade_journal import (
     append_trade_event,
@@ -55,11 +56,25 @@ def _short_id(value: str) -> str:
     return str(value)[:8]
 
 
+def _entry_display(row) -> str | float:
+    if str(row.get("order_type") or "").upper() != "MARKET":
+        return row.get("entry")
+    execution = row.get("execution_price")
+    try:
+        execution = float(execution)
+    except (TypeError, ValueError):
+        execution = np.nan
+    if np.isfinite(execution):
+        display = mt5_price_to_plan(row.get("cfd_symbol"), execution)
+        return f"AUTO → {display:g}" if display is not None else "AUTO"
+    return "AUTO"
+
+
 page_header(
     "Trading · Journal",
     "Trading Journal",
     "Unveränderliche Trade-Pläne, getrennte Trader-Identitäten und automatisch berechnete Simulationsergebnisse.",
-    "V3.8.1.5 · LIVE EXECUTION WATCHER",
+    "V3.8.1.5.1 · MARKET AUTO-FILL & PRICE UNITS",
 )
 
 deployment = deployment_config_from_mapping(_secret_section("deployment"))
@@ -223,14 +238,15 @@ view["R:R"] = pd.to_numeric(view["planned_rr"], errors="coerce").map(lambda x: f
 view["Result"] = pd.to_numeric(view.get("result_r"), errors="coerce").map(_fmt_r)
 view["Status"] = view.get("lifecycle_status", pd.Series(index=view.index, dtype=object)).fillna("PLANNED")
 view["Trader"] = view.get("trader_display_name", pd.Series(index=view.index, dtype=object)).fillna("Legacy")
+view["EntryDisplay"] = view.apply(_entry_display, axis=1)
 columns = ["created", "ID"]
 if is_admin and trader_filter_id is None:
     columns.append("Trader")
-columns += ["cfd_symbol", "side", "plan_type", "order_type", "Status", "timeframe", "entry", "stop", "target", "R:R", "Result"]
+columns += ["cfd_symbol", "side", "plan_type", "order_type", "Status", "timeframe", "EntryDisplay", "stop", "target", "R:R", "Result"]
 st.dataframe(
     view[columns].rename(columns={
         "created": "Zeit", "cfd_symbol": "Symbol", "side": "Richtung", "plan_type": "Typ", "order_type": "Order",
-        "timeframe": "TF", "entry": "Entry", "stop": "SL", "target": "TP",
+        "timeframe": "TF", "EntryDisplay": "Entry", "stop": "SL", "target": "TP",
     }),
     use_container_width=True,
     hide_index=True,
@@ -248,7 +264,8 @@ c1, c2, c3, c4 = st.columns(4)
 with c1:
     metric_card("SYMBOL", str(row["cfd_symbol"]), str(row["side"]))
 with c2:
-    metric_card("ENTRY / SL", f"{row['entry']} / {row['stop']}", f"TP {row['target'] if pd.notna(row['target']) else '—'}")
+    entry_label = _entry_display(row)
+    metric_card("ENTRY / SL", f"{entry_label} / {row['stop']}", f"TP {row['target'] if pd.notna(row['target']) else '—'}")
 with c3:
     metric_card("PLAN R:R", f"{row['planned_rr']:.2f}R" if pd.notna(row["planned_rr"]) else "—", str(row["timeframe"]))
 with c4:
@@ -303,13 +320,15 @@ if outcome:
         metric_card("MAE", _fmt_r(outcome.get("mae_r")), "maximal adverse")
     execution_price = outcome.get("execution_price")
     if execution_price is not None and pd.notna(execution_price):
-        planned_entry = float(row["entry"])
         execution_value = float(execution_price)
         fill_tf = str(outcome.get("fill_timeframe") or outcome.get("data_timeframe") or "—")
         if str(row.get("order_type") or "").upper() == "MARKET":
+            display_execution = mt5_price_to_plan(row.get("cfd_symbol"), execution_value)
+            factor = price_factor_to_mt5(row.get("cfd_symbol"))
+            unit_suffix = f" · MT5 {execution_value:g} (×{factor:g})" if factor != 1.0 else ""
             st.caption(
-                f"MARKET Fill: {execution_value:g} · Auflösung {fill_tf} · geplanter Referenz-Entry {planned_entry:g}. "
-                "Der ursprüngliche Plan bleibt unverändert; Prop Desk und Outcome verwenden den simulierten Fill."
+                f"MARKET Auto-Fill: {display_execution:g}{unit_suffix} · Auflösung {fill_tf}. "
+                "Kein manueller Entry wird für die Ausführung verwendet; Prop Desk und Outcome verwenden ausschließlich den tatsächlichen Fill."
             )
     if str(outcome.get("lifecycle_status") or "") == "AMBIGUOUS":
         st.warning("Intrabar-Reihenfolge bleibt selbst nach M1-Auflösung unklar. Der Tracker erfindet deshalb kein SL/TP-Ergebnis.")

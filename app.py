@@ -47,7 +47,7 @@ else:
 
 def _login_screen_local():
     st.title("◆ COT Research")
-    st.caption("V3.8.1.5 · LIVE EXECUTION WATCHER · Multi-Trader")
+    st.caption("V3.8.1.5.1 · MARKET AUTO-FILL & PRICE UNITS · Multi-Trader")
     if trader_count(db_path=db_path) == 0:
         st.subheader("Erstes Admin-Konto anlegen")
         st.info("Dieses Konto übernimmt automatisch alle bereits vorhandenen Journal-Trades ohne Trader-Zuordnung.")

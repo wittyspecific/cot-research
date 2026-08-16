@@ -10,10 +10,11 @@ from typing import Any, Mapping
 import pandas as pd
 
 from .mt5_account import MT5Config, read_bridge_quotes, write_bridge_quote_watch
+from .price_units import plan_to_mt5_units
 from .trade_journal import activate_simulation_trade_live, list_trade_plans
 
 
-WATCHER_VERSION = "3.8.1.5"
+WATCHER_VERSION = "3.8.1.5.1"
 
 
 def _utc(value: Any) -> pd.Timestamp:
@@ -56,14 +57,17 @@ def resolve_live_entry(plan: Mapping[str, Any], quote: Mapping[str, Any], *, now
     if tick_age < 0 or tick_age > float(max_tick_age_seconds):
         return None
 
-    side = str(plan.get("side", "") or "").upper()
-    order_type = str(plan.get("order_type", "LIMIT") or "LIMIT").upper()
+    normalized = plan_to_mt5_units(plan)
+    side = str(normalized.get("side", "") or "").upper()
+    order_type = str(normalized.get("order_type", "LIMIT") or "LIMIT").upper()
     bid = _finite(quote.get("bid"))
     ask = _finite(quote.get("ask"))
-    entry = _finite(plan.get("entry"))
-    stop = _finite(plan.get("stop"))
-    target = _finite(plan.get("target"))
-    if side not in {"LONG", "SHORT"} or entry is None or stop is None:
+    entry = _finite(normalized.get("entry"))
+    stop = _finite(normalized.get("stop"))
+    target = _finite(normalized.get("target"))
+    if side not in {"LONG", "SHORT"} or stop is None:
+        return None
+    if order_type == "LIMIT" and entry is None:
         return None
 
     can_open = _finite(quote.get("can_open"))

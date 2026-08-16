@@ -14,6 +14,8 @@ import uuid
 import numpy as np
 import pandas as pd
 
+from .price_units import auto_market_reference_entry
+
 
 JOURNAL_SCHEMA_VERSION = 6
 SNAPSHOT_SCHEMA_VERSION = "1.0"
@@ -429,28 +431,50 @@ def validate_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
     cfd_symbol = str(p.get("cfd_symbol", "") or "").strip()
     if not cfd_symbol:
         raise ValueError("CFD-Symbol fehlt.")
-    entry = float(p.get("entry"))
-    stop = float(p.get("stop"))
-    if not np.isfinite(entry) or not np.isfinite(stop) or entry == stop:
-        raise ValueError("Entry und Stop müssen gültig und verschieden sein.")
-    if side == "LONG" and stop >= entry:
-        raise ValueError("Bei LONG muss der Stop unter dem Entry liegen.")
-    if side == "SHORT" and stop <= entry:
-        raise ValueError("Bei SHORT muss der Stop über dem Entry liegen.")
-    target_raw = p.get("target")
-    target = None if target_raw in (None, "") else float(target_raw)
-    if target is not None and not np.isfinite(target):
-        target = None
-    if target is not None and side == "LONG" and target <= entry:
-        raise ValueError("Bei LONG muss ein verwendetes Target über dem Entry liegen.")
-    if target is not None and side == "SHORT" and target >= entry:
-        raise ValueError("Bei SHORT muss ein verwendetes Target unter dem Entry liegen.")
+
     zone_low_raw = p.get("zone_low")
     zone_high_raw = p.get("zone_high")
     zone_low = None if zone_low_raw in (None, "") else float(zone_low_raw)
     zone_high = None if zone_high_raw in (None, "") else float(zone_high_raw)
+    if zone_low is not None and not np.isfinite(zone_low):
+        zone_low = None
+    if zone_high is not None and not np.isfinite(zone_high):
+        zone_high = None
     if zone_low is not None and zone_high is not None and zone_low > zone_high:
         zone_low, zone_high = zone_high, zone_low
+
+    stop = float(p.get("stop"))
+    if not np.isfinite(stop):
+        raise ValueError("Stop muss gültig sein.")
+    target_raw = p.get("target")
+    target = None if target_raw in (None, "") else float(target_raw)
+    if target is not None and not np.isfinite(target):
+        target = None
+
+    market_entry_auto = order_type == "MARKET"
+    if market_entry_auto:
+        # trade_plans.entry is a legacy NOT-NULL column. Store an automatically
+        # derived immutable reference for schema compatibility only; it is never
+        # used as the MARKET execution price.
+        reference_entry = auto_market_reference_entry({**p, "zone_low": zone_low, "zone_high": zone_high})
+        if reference_entry is None or not np.isfinite(reference_entry):
+            raise ValueError("MARKET benötigt keinen Entry; Zone Low und Zone High müssen aber gültig sein.")
+        entry = float(reference_entry)
+        planned_rr = None
+    else:
+        entry = float(p.get("entry"))
+        if not np.isfinite(entry) or entry == stop:
+            raise ValueError("Entry und Stop müssen gültig und verschieden sein.")
+        if side == "LONG" and stop >= entry:
+            raise ValueError("Bei LONG muss der Stop unter dem Entry liegen.")
+        if side == "SHORT" and stop <= entry:
+            raise ValueError("Bei SHORT muss der Stop über dem Entry liegen.")
+        if target is not None and side == "LONG" and target <= entry:
+            raise ValueError("Bei LONG muss ein verwendetes Target über dem Entry liegen.")
+        if target is not None and side == "SHORT" and target >= entry:
+            raise ValueError("Bei SHORT muss ein verwendetes Target unter dem Entry liegen.")
+        planned_rr = _planned_rr(side, entry, stop, target)
+
     requested_risk_pct = float(p.get("requested_risk_pct", 0.0) or 0.0)
     if requested_risk_pct < 0:
         raise ValueError("requested_risk_pct darf nicht negativ sein.")
@@ -463,12 +487,13 @@ def validate_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
         "zone_type": zone_type,
         "cfd_symbol": cfd_symbol,
         "entry": entry,
+        "market_entry_auto": market_entry_auto,
         "stop": stop,
         "target": target,
         "zone_low": zone_low,
         "zone_high": zone_high,
         "requested_risk_pct": requested_risk_pct,
-        "planned_rr": _planned_rr(side, entry, stop, target),
+        "planned_rr": planned_rr,
     })
     if plan_type == "SKIPPED" and not str(p.get("skip_reason", "") or "").strip():
         p["skip_reason"] = "NICHT ANGEGEBEN"
@@ -733,7 +758,7 @@ def activate_simulation_trade_live(
         con.execute("BEGIN IMMEDIATE")
         row = con.execute(
             """
-            SELECT p.plan_type, COALESCE(o.lifecycle_status, 'PLANNED') AS lifecycle_status,
+            SELECT p.plan_type, p.order_type, COALESCE(o.lifecycle_status, 'PLANNED') AS lifecycle_status,
                    COALESCE(o.entry_triggered, 0) AS entry_triggered
             FROM trade_plans p
             LEFT JOIN trade_outcomes o ON o.trade_id=p.trade_id
@@ -793,6 +818,15 @@ def activate_simulation_trade_live(
             """,
             (event_id, str(trade_id), _iso_utc(now_utc), _iso_local(now_local), "ENTRY_TRIGGERED_LIVE", "MT5_BRIDGE", canonical_json(event_payload)),
         )
+        order_type = str(row["order_type"] or "").upper()
+    if order_type == "MARKET" and f.get("execution_price") is not None:
+        try:
+            from .prop_desk import finalize_market_execution_sizing
+            finalize_market_execution_sizing(str(trade_id), float(f["execution_price"]), db_path=path)
+        except Exception:
+            # Outcome activation is the source of truth. Prop sizing is retried
+            # lazily by the Prop Desk if its symbol spec was temporarily missing.
+            pass
     return True
 
 

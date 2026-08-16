@@ -10,6 +10,7 @@ from src.deployment_mode import REMOTE_GATEWAY, deployment_config_from_mapping
 from src.ftmo_risk import risk_config_from_mapping
 from src.journal_gateway_client import JournalGatewayClient, JournalGatewayError, config_from_mapping as gateway_config_from_mapping
 from src.prop_gateway_compat import prop_account as remote_prop_account
+from src.price_units import mt5_price_to_plan, planner_digits, price_unit_note
 from src.mt5_account import (
     MT5BridgeError,
     MT5ConfigError,
@@ -101,7 +102,7 @@ page_header(
     "Trading · Trade Planner",
     "Trade Planner",
     "Manuelle Supply-&-Demand-Idee eingeben; Research- und MT5-Kontext werden im selben Moment unveränderlich gespeichert.",
-    "V3.8.1.5 · LIVE EXECUTION WATCHER",
+    "V3.8.1.5.1 · MARKET AUTO-FILL & PRICE UNITS",
 )
 
 st.caption(
@@ -223,10 +224,14 @@ with c5:
     timeframe = st.selectbox("S&D Timeframe", ["4H", "Daily", "Weekly", "1H", "Andere"])
 
 spec = _symbol_row(catalog, symbol)
-mark = _mark_price(spec)
-digits = int(_finite(spec.get("digits"), 5) if np.isfinite(_finite(spec.get("digits"), 5)) else 5)
-digits = min(max(digits, 0), 8)
+mt5_mark = _mark_price(spec)
+mark = mt5_price_to_plan(symbol, mt5_mark) if np.isfinite(mt5_mark) else np.nan
+mt5_digits = int(_finite(spec.get("digits"), 5) if np.isfinite(_finite(spec.get("digits"), 5)) else 5)
+digits = planner_digits(symbol, mt5_digits)
 inferred = infer_cot_context(symbol, spec)
+unit_note = price_unit_note(symbol)
+if unit_note:
+    st.info(unit_note)
 
 c1, c2, c3, c4 = st.columns(4)
 with c1:
@@ -249,7 +254,7 @@ with st.expander(f"TradingView Chart · {symbol}", expanded=True):
     tv_symbol = render_tradingview_chart(symbol, timeframe=timeframe, height=570)
     st.caption(
         f"TradingView-Mapping: {symbol} → {tv_symbol}. Der Chart dient nur der visuellen Analyse. "
-        "Entry/SL/TP und spätere Outcomes werden weiterhin anhand des FTMO/MT5-CFDs gespeichert bzw. ausgewertet. "
+        "Zone/SL/TP werden in Planner-Einheiten gespeichert; Execution und spätere Outcomes werden automatisch auf FTMO/MT5-CFD-Einheiten normalisiert. "
         "Falls das Broker-Symbol nicht exakt gemappt wird, kannst du oben im TradingView-Widget das Symbol manuell wechseln."
     )
 
@@ -269,7 +274,7 @@ with st.expander("COT-Zuordnung manuell überschreiben", expanded=False):
     else:
         st.caption("Automatische Zuordnung bleibt aktiv. FX-Paare speichern Base- und Quote-COT getrennt.")
 
-section_line("2 · Supply & Demand Plan", "Zone, Entry, Invalidierung, Target")
+section_line("2 · Supply & Demand Plan", "Zone, Execution, Invalidierung, Target")
 
 # Sensible display defaults only; the user remains the source of the actual S&D levels.
 base_price = float(mark) if np.isfinite(mark) and mark > 0 else 1.0
@@ -293,7 +298,16 @@ with z3:
 
 x1, x2, x3 = st.columns(3)
 with x1:
-    entry = st.number_input("Entry", value=float(base_price), step=float(step), format=f"%.{digits}f")
+    if order_type == "MARKET":
+        st.text_input(
+            "Entry",
+            value="AUTO · nächster Ask" if side == "LONG" else "AUTO · nächster Bid",
+            disabled=True,
+            help="MARKET benötigt keinen manuellen Entry. Der nächste frische MT5 Ask/Bid wird als Execution gespeichert.",
+        )
+        entry = None
+    else:
+        entry = st.number_input("Limit Entry", value=float(base_price), step=float(step), format=f"%.{digits}f")
 with x2:
     suggested_stop = base_price * (0.99 if side == "LONG" else 1.01)
     stop = st.number_input("Stop Loss", value=float(suggested_stop), step=float(step), format=f"%.{digits}f")
@@ -340,18 +354,22 @@ with r3:
 
 notes = st.text_area("Notiz", placeholder="Optional: Warum gefällt dir die Zone / was ist der Kontext?")
 
-risk_distance = abs(float(entry) - float(stop))
-if use_target and risk_distance > 0:
-    reward = (float(target) - float(entry)) if side == "LONG" else (float(entry) - float(target))
-    rr = reward / risk_distance
+if order_type == "LIMIT":
+    risk_distance = abs(float(entry) - float(stop))
+    if use_target and risk_distance > 0:
+        reward = (float(target) - float(entry)) if side == "LONG" else (float(entry) - float(target))
+        rr = reward / risk_distance
+    else:
+        rr = np.nan
 else:
+    risk_distance = np.nan
     rr = np.nan
 
 m1, m2, m3 = st.columns(3)
 with m1:
-    metric_card("STOP DISTANCE", _price(risk_distance, digits), "Entry → SL")
+    metric_card("STOP DISTANCE", _price(risk_distance, digits) if np.isfinite(risk_distance) else "AUTO", "Execution → SL nach Live-Fill" if order_type == "MARKET" else "Entry → SL")
 with m2:
-    metric_card("PLANNED R:R", f"{rr:.2f}R" if np.isfinite(rr) else "—", "Target relativ zum initialen Risiko")
+    metric_card("PLANNED R:R", f"{rr:.2f}R" if np.isfinite(rr) else "nach Fill" if order_type == "MARKET" else "—", "Target relativ zum tatsächlichen initialen Risiko")
 with m3:
     metric_card("SNAPSHOT", "IMMUTABLE", "wird beim Speichern eingefroren")
 
@@ -419,6 +437,11 @@ if st.button("Trade-Plan + vollständigen Snapshot speichern", type="primary", u
                     f"Prop Desk: {float(prop_allocation.get('lots', 0) or 0):g} virtuelle Lots · "
                     f"{_money(prop_allocation.get('actual_risk'), prop_account.get('currency', 'USD'))} initiales Risiko · "
                     f"Balance beim Plan {_money(prop_allocation.get('balance_at_plan'), prop_account.get('currency', 'USD'))}."
+                )
+            elif prop_allocation and prop_allocation.get("sizing_status") == "PENDING_FILL":
+                st.info(
+                    f"Prop Desk: Risk-Budget {_money(prop_allocation.get('risk_budget'), prop_account.get('currency', 'USD'))} eingefroren. "
+                    "Virtuelle Lots werden automatisch mit dem tatsächlichen MARKET-Fill berechnet."
                 )
             elif prop_allocation:
                 st.warning(f"Prop-Desk Positionsgröße nicht verfügbar: {prop_allocation.get('sizing_reason') or prop_allocation.get('sizing_status')}")

@@ -12,6 +12,7 @@ import pandas as pd
 from .mt5_account import MT5Config
 from .mt5_history import HistoryRequest, MT5HistoryError, history_batch
 from .mt5_history_cache import ensure_history_time_basis, load_cached_bars, merge_missing_requests, missing_intervals, store_history_segment
+from .price_units import plan_to_mt5_units
 from .trade_journal import get_trade_outcome, list_trade_plans, upsert_trade_outcome
 
 
@@ -132,6 +133,7 @@ def resolve_market_fill(
     if str(plan.get("order_type", "LIMIT") or "LIMIT").upper() != "MARKET":
         raise ValueError("resolve_market_fill ist nur für MARKET-Pläne gedacht.")
 
+    plan = plan_to_mt5_units(plan)
     created = _utc(plan["created_at_utc"])
     now_ts = _utc(now or datetime.now(timezone.utc))
     data = _prepare_bars(bars, created, tf)
@@ -218,7 +220,7 @@ def resolve_market_fill(
 
 def _effective_resolved_entry_plan(plan: Mapping[str, Any], fill: Mapping[str, Any]) -> dict[str, Any]:
     """Replay exits from an already-resolved live/history entry without re-triggering it."""
-    effective = dict(plan)
+    effective = plan_to_mt5_units(plan)
     effective["entry"] = float(fill["execution_price"])
     effective["created_at_utc"] = str(fill["entry_time_utc"])
     effective["_resolved_entry_fill"] = True
@@ -239,6 +241,7 @@ def evaluate_trade_path(plan: Mapping[str, Any], bars: pd.DataFrame, *, timefram
     If entry and exit, or stop and target, occur inside the same bar, the result is
     AMBIGUOUS so the caller can rerun the whole path with a finer timeframe.
     """
+    plan = plan_to_mt5_units(plan)
     side = str(plan.get("side", "")).upper()
     order_type = str(plan.get("order_type", "LIMIT") or "LIMIT").upper()
     entry = float(plan["entry"])
@@ -480,6 +483,7 @@ def evaluate_trade_path(plan: Mapping[str, Any], bars: pd.DataFrame, *, timefram
 
 
 def add_forward_returns(outcome: dict[str, Any], plan: Mapping[str, Any], daily_bars: pd.DataFrame) -> dict[str, Any]:
+    plan = plan_to_mt5_units(plan)
     result = dict(outcome)
     if not result.get("entry_triggered") or not result.get("entry_time_utc") or daily_bars is None or daily_bars.empty:
         return result

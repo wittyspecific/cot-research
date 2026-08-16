@@ -60,6 +60,7 @@ from .markets import CLASSIC_MARKETS
 from .trade_context import all_markets, market_by_symbol, infer_cot_context
 from .nc_divergence import current_divergence
 from .prices import load_prices, price_alignment_audit
+from .price_units import auto_market_reference_entry, plan_price_to_mt5, price_factor_to_mt5
 from .publication import publication_info
 from .report_analysis import enrich_report_positioning
 from .seasonality import forward_statistics, seasonal_consistency
@@ -454,7 +455,10 @@ def collect_trade_snapshot(
     now = datetime.now(timezone.utc)
     symbol = str(plan.get("cfd_symbol", "") or "")
     side = str(plan.get("side", "") or "").upper()
-    entry = float(plan.get("entry"))
+    order_type = str(plan.get("order_type", "LIMIT") or "LIMIT").upper()
+    entry_raw = plan.get("entry")
+    entry = None if entry_raw in (None, "") else float(entry_raw)
+    reference_entry = auto_market_reference_entry(plan) if order_type == "MARKET" else entry
     stop = float(plan.get("stop"))
     requested_risk_pct = float(plan.get("requested_risk_pct", risk_cfg.target_trade_risk_pct) or risk_cfg.target_trade_risk_pct)
 
@@ -477,8 +481,12 @@ def collect_trade_snapshot(
         "execution": {
             "cfd_symbol": symbol,
             "side": side,
+            "order_type": order_type,
             "entry": entry,
+            "entry_mode": "AUTO_LIVE_TICK" if order_type == "MARKET" else "PLANNED_LIMIT",
+            "reference_entry": reference_entry,
             "stop": stop,
+            "price_factor_to_mt5": price_factor_to_mt5(symbol),
             "target": plan.get("target"),
             "zone_type": plan.get("zone_type"),
             "zone_low": plan.get("zone_low"),
@@ -518,18 +526,25 @@ def collect_trade_snapshot(
                 "cockpit": cockpit,
             }
             if spec:
-                approval = pretrade_approval(
-                    account=account,
-                    positions=positions,
-                    cfg=risk_cfg,
-                    spec=spec,
-                    symbol=symbol,
-                    side=side,
-                    entry=entry,
-                    stop=stop,
-                    requested_risk_pct=requested_risk_pct,
-                )
-                payload["risk"]["pretrade_approval"] = approval
+                if order_type == "MARKET":
+                    payload["risk"]["pretrade_approval"] = {
+                        "status": "PENDING_MARKET_FILL",
+                        "reason": "MARKET-Lotgröße wird erst mit dem nächsten echten MT5 Bid/Ask-Fill berechnet.",
+                        "requested_risk_pct": requested_risk_pct,
+                    }
+                else:
+                    approval = pretrade_approval(
+                        account=account,
+                        positions=positions,
+                        cfg=risk_cfg,
+                        spec=spec,
+                        symbol=symbol,
+                        side=side,
+                        entry=float(plan_price_to_mt5(symbol, entry)),
+                        stop=float(plan_price_to_mt5(symbol, stop)),
+                        requested_risk_pct=requested_risk_pct,
+                    )
+                    payload["risk"]["pretrade_approval"] = approval
             else:
                 payload["errors"].append("MT5-Symbolspezifikation für Pre-Trade-Lot-Sizing nicht gefunden.")
         except Exception as exc:

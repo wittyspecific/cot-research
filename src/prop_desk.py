@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from .ftmo_risk import size_trade
+from .price_units import mt5_price_to_plan, plan_price_to_mt5
 from .trade_journal import canonical_json, get_trade_snapshot, initialize_journal, journal_connection
 
 DEFAULT_STARTING_CAPITAL = 200_000.0
@@ -65,6 +66,24 @@ def _prop_schema(db_path: str | Path | None = None) -> Path:
                 sizing_payload_json TEXT NOT NULL DEFAULT '{}'
             );
 
+            CREATE TABLE IF NOT EXISTS prop_execution_sizing (
+                trade_id TEXT PRIMARY KEY REFERENCES trade_plans(trade_id),
+                trader_id TEXT NOT NULL REFERENCES traders(trader_id),
+                execution_price REAL NOT NULL,
+                stop_price_mt5 REAL NOT NULL,
+                risk_budget REAL NOT NULL,
+                lots REAL,
+                raw_lots REAL,
+                actual_risk REAL,
+                risk_per_lot REAL,
+                tick_size REAL,
+                tick_value REAL,
+                sizing_status TEXT NOT NULL,
+                sizing_reason TEXT,
+                created_at_utc TEXT NOT NULL,
+                sizing_payload_json TEXT NOT NULL DEFAULT '{}'
+            );
+
             CREATE INDEX IF NOT EXISTS idx_prop_allocations_trader
             ON prop_trade_allocations(trader_id, created_at_utc);
 
@@ -75,6 +94,14 @@ def _prop_schema(db_path: str | Path | None = None) -> Path:
             CREATE TRIGGER IF NOT EXISTS no_delete_prop_trade_allocations
             BEFORE DELETE ON prop_trade_allocations
             BEGIN SELECT RAISE(ABORT, 'prop_trade_allocations are immutable'); END;
+
+            CREATE TRIGGER IF NOT EXISTS no_update_prop_execution_sizing
+            BEFORE UPDATE ON prop_execution_sizing
+            BEGIN SELECT RAISE(ABORT, 'prop_execution_sizing is immutable'); END;
+
+            CREATE TRIGGER IF NOT EXISTS no_delete_prop_execution_sizing
+            BEFORE DELETE ON prop_execution_sizing
+            BEGIN SELECT RAISE(ABORT, 'prop_execution_sizing is immutable'); END;
             """
         )
     return path
@@ -161,13 +188,20 @@ def update_prop_account(
 
 def _closed_rows(trader_id: str, *, db_path: str | Path) -> pd.DataFrame:
     query = """
-        SELECT p.trade_id, p.cfd_symbol, p.side, p.entry, p.stop, p.target,
+        SELECT p.trade_id, p.cfd_symbol, p.side, p.order_type, p.entry, p.stop, p.target,
                p.created_at_utc, a.balance_at_plan, a.requested_risk_pct,
-               a.risk_budget, a.lots, a.actual_risk, a.risk_per_lot, a.tick_size, a.tick_value, a.sizing_status,
+               a.risk_budget,
+               COALESCE(e.lots, a.lots) AS lots,
+               COALESCE(e.actual_risk, a.actual_risk) AS actual_risk,
+               COALESCE(e.risk_per_lot, a.risk_per_lot) AS risk_per_lot,
+               COALESCE(e.tick_size, a.tick_size) AS tick_size,
+               COALESCE(e.tick_value, a.tick_value) AS tick_value,
+               COALESCE(e.sizing_status, a.sizing_status) AS sizing_status,
                o.lifecycle_status, o.exit_time_utc, o.result_r, o.first_exit,
                o.entry_time_utc, o.execution_price, o.fill_timeframe
         FROM prop_trade_allocations a
         JOIN trade_plans p ON p.trade_id=a.trade_id
+        LEFT JOIN prop_execution_sizing e ON e.trade_id=p.trade_id
         LEFT JOIN trade_outcomes o ON o.trade_id=p.trade_id
         WHERE a.trader_id=? AND p.plan_type='SIMULATION'
         ORDER BY COALESCE(o.exit_time_utc, p.created_at_utc), p.created_at_utc, p.trade_id
@@ -181,6 +215,7 @@ def realized_balance(
 ) -> float:
     path = _prop_schema(db_path)
     account = ensure_prop_account(trader_id, db_path=path)
+    finalize_pending_market_allocations(str(trader_id), db_path=path)
     df = _closed_rows(trader_id, db_path=path)
     if df.empty:
         return float(account["starting_capital"])
@@ -213,10 +248,11 @@ def create_prop_allocation(
     db_path: str | Path | None = None,
     balance_as_of_utc: str | None = None,
 ) -> dict[str, Any] | None:
-    """Freeze virtual account sizing for SIMULATION trades only.
+    """Freeze the plan-time risk budget; MARKET lots wait for the real fill.
 
-    Balance/risk/lots are immutable once the plan is stored. This prevents a later
-    account balance from retroactively changing historical position size.
+    LIMIT can be sized immediately because its execution level is known. MARKET
+    freezes balance/risk-budget at plan time but stores PENDING_FILL until an
+    actual MT5 execution price exists. This avoids sizing from a made-up entry.
     """
     if str(plan.get("plan_type", "")).upper() != "SIMULATION" or not trader_id:
         return None
@@ -229,15 +265,27 @@ def create_prop_allocation(
     balance = realized_balance(str(trader_id), db_path=path, as_of_utc=balance_as_of_utc)
     risk_budget = balance * max(requested, 0.0)
     spec = _snapshot_spec(snapshot_payload)
+    order_type = str(plan.get("order_type", "LIMIT") or "LIMIT").upper()
+
     if requested <= 0 or requested > max_risk + 1e-12:
         sizing = {"ok": False, "reason": f"Prop-Desk Risiko muss zwischen 0 und {max_risk*100:.2f}% liegen."}
         status = "BLOCKED"
+    elif order_type == "MARKET":
+        sizing = {
+            "ok": False,
+            "pending": True,
+            "reason": "MARKET-Lotgröße wartet auf den echten MT5 Bid/Ask-Fill.",
+            "risk_budget": float(risk_budget),
+        }
+        status = "PENDING_FILL"
     else:
+        entry_mt5 = plan_price_to_mt5(plan.get("cfd_symbol"), plan.get("entry"))
+        stop_mt5 = plan_price_to_mt5(plan.get("cfd_symbol"), plan.get("stop"))
         sizing = size_trade(
             spec,
             side=str(plan.get("side", "")),
-            entry=float(plan.get("entry")),
-            stop=float(plan.get("stop")),
+            entry=float(entry_mt5),
+            stop=float(stop_mt5),
             risk_budget=float(risk_budget),
         )
         status = "SIZED" if bool(sizing.get("ok")) else "UNSIZED"
@@ -286,6 +334,118 @@ def create_prop_allocation(
             ),
         )
     return row
+
+
+def finalize_market_execution_sizing(
+    trade_id: str,
+    execution_price: float,
+    *,
+    db_path: str | Path | None = None,
+) -> dict[str, Any] | None:
+    """Freeze MARKET lots exactly once from the actual broker-unit execution."""
+    path = _prop_schema(db_path)
+    with journal_connection(path) as con:
+        existing = con.execute("SELECT * FROM prop_execution_sizing WHERE trade_id=?", (str(trade_id),)).fetchone()
+        if existing is not None:
+            return dict(existing)
+        row = con.execute(
+            """
+            SELECT p.trade_id, p.trader_id, p.plan_type, p.order_type, p.cfd_symbol, p.side, p.stop,
+                   a.risk_budget, a.sizing_status
+            FROM trade_plans p
+            JOIN prop_trade_allocations a ON a.trade_id=p.trade_id
+            WHERE p.trade_id=?
+            """,
+            (str(trade_id),),
+        ).fetchone()
+    if row is None or str(row["plan_type"] or "").upper() != "SIMULATION":
+        return None
+    if str(row["order_type"] or "").upper() != "MARKET":
+        return None
+    if str(row["sizing_status"] or "").upper() == "BLOCKED":
+        return None
+
+    snapshot = get_trade_snapshot(str(trade_id), db_path=path)
+    spec = _snapshot_spec(snapshot)
+    stop_mt5 = plan_price_to_mt5(row["cfd_symbol"], row["stop"])
+    sizing = size_trade(
+        spec,
+        side=str(row["side"] or ""),
+        entry=float(execution_price),
+        stop=float(stop_mt5),
+        risk_budget=float(row["risk_budget"]),
+    )
+    status = "SIZED" if bool(sizing.get("ok")) else "UNSIZED"
+    reason = "" if status == "SIZED" else str(sizing.get("reason", "Positionsgröße nicht berechenbar."))
+    tick_value = _finite(spec.get("tick_value_loss"))
+    if not np.isfinite(tick_value) or tick_value <= 0:
+        tick_value = _finite(spec.get("tick_value"))
+    result = {
+        "trade_id": str(trade_id),
+        "trader_id": str(row["trader_id"] or ""),
+        "execution_price": float(execution_price),
+        "stop_price_mt5": float(stop_mt5),
+        "risk_budget": float(row["risk_budget"]),
+        "lots": _finite(sizing.get("lots"), np.nan),
+        "raw_lots": _finite(sizing.get("raw_lots"), np.nan),
+        "actual_risk": _finite(sizing.get("actual_risk"), np.nan),
+        "risk_per_lot": _finite(sizing.get("risk_per_lot"), np.nan),
+        "tick_size": _finite(spec.get("tick_size"), np.nan),
+        "tick_value": tick_value,
+        "sizing_status": status,
+        "sizing_reason": reason,
+        "created_at_utc": _utc_now_iso(),
+        "sizing_payload_json": canonical_json(sizing),
+    }
+    with journal_connection(path) as con:
+        con.execute(
+            """
+            INSERT OR IGNORE INTO prop_execution_sizing(
+                trade_id, trader_id, execution_price, stop_price_mt5, risk_budget,
+                lots, raw_lots, actual_risk, risk_per_lot, tick_size, tick_value,
+                sizing_status, sizing_reason, created_at_utc, sizing_payload_json
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                result["trade_id"], result["trader_id"], result["execution_price"], result["stop_price_mt5"], result["risk_budget"],
+                result["lots"], result["raw_lots"], result["actual_risk"], result["risk_per_lot"], result["tick_size"], result["tick_value"],
+                result["sizing_status"], result["sizing_reason"], result["created_at_utc"], result["sizing_payload_json"],
+            ),
+        )
+        stored = con.execute("SELECT * FROM prop_execution_sizing WHERE trade_id=?", (str(trade_id),)).fetchone()
+    return dict(stored) if stored is not None else result
+
+
+def finalize_pending_market_allocations(trader_id: str | None = None, *, db_path: str | Path | None = None) -> int:
+    path = _prop_schema(db_path)
+    params: list[Any] = []
+    trader_clause = ""
+    if trader_id:
+        trader_clause = " AND p.trader_id=?"
+        params.append(str(trader_id))
+    with journal_connection(path) as con:
+        rows = con.execute(
+            f"""
+            SELECT p.trade_id, o.execution_price
+            FROM trade_plans p
+            JOIN prop_trade_allocations a ON a.trade_id=p.trade_id
+            JOIN trade_outcomes o ON o.trade_id=p.trade_id
+            LEFT JOIN prop_execution_sizing e ON e.trade_id=p.trade_id
+            WHERE p.plan_type='SIMULATION' AND p.order_type='MARKET'
+              AND a.sizing_status<>'BLOCKED' AND e.trade_id IS NULL
+              AND COALESCE(o.entry_triggered,0)=1 AND o.execution_price IS NOT NULL
+              {trader_clause}
+            """,
+            params,
+        ).fetchall()
+    created = 0
+    for row in rows:
+        try:
+            if finalize_market_execution_sizing(str(row["trade_id"]), float(row["execution_price"]), db_path=path):
+                created += 1
+        except Exception:
+            continue
+    return created
 
 
 def backfill_prop_allocations(trader_id: str, *, db_path: str | Path | None = None) -> int:
@@ -339,7 +499,16 @@ def get_prop_allocation(trade_id: str, *, db_path: str | Path | None = None) -> 
     path = _prop_schema(db_path)
     with journal_connection(path) as con:
         row = con.execute("SELECT * FROM prop_trade_allocations WHERE trade_id=?", (str(trade_id),)).fetchone()
-    return dict(row) if row is not None else {}
+        execution = con.execute("SELECT * FROM prop_execution_sizing WHERE trade_id=?", (str(trade_id),)).fetchone()
+    if row is None:
+        return {}
+    result = dict(row)
+    if execution is not None:
+        e = dict(execution)
+        for key in ("lots", "raw_lots", "actual_risk", "risk_per_lot", "tick_size", "tick_value", "sizing_status", "sizing_reason", "sizing_payload_json"):
+            result[key] = e.get(key)
+        result["execution_sizing"] = e
+    return result
 
 
 def _catalog_map(mt5_snapshot: Mapping[str, Any] | None) -> tuple[dict[str, dict[str, Any]], str | None]:
@@ -379,13 +548,14 @@ def _effective_entry(row: Mapping[str, Any]) -> float:
     execution = _finite(row.get("execution_price"))
     if np.isfinite(execution):
         return execution
-    return _finite(row.get("entry"))
+    normalized = plan_price_to_mt5(row.get("cfd_symbol"), row.get("entry"))
+    return _finite(normalized)
 
 
 def _effective_risk_usd(row: Mapping[str, Any]) -> float:
-    """Actual stop risk using the resolved MARKET fill when available."""
+    """Actual stop risk using broker-unit execution and normalized stop."""
     entry = _effective_entry(row)
-    stop = _finite(row.get("stop"))
+    stop = _finite(plan_price_to_mt5(row.get("cfd_symbol"), row.get("stop")))
     lots = _finite(row.get("lots"))
     tick_size = _finite(row.get("tick_size"))
     tick_value = _finite(row.get("tick_value"))
@@ -416,6 +586,7 @@ def prop_desk_state(
     path = _prop_schema(db_path)
     account = ensure_prop_account(trader_id, db_path=path)
     backfill_prop_allocations(trader_id, db_path=path)
+    finalize_pending_market_allocations(str(trader_id), db_path=path)
     df = _closed_rows(trader_id, db_path=path)
     if df.empty:
         return {
@@ -452,11 +623,15 @@ def prop_desk_state(
             floating_values.append(float(pnl))
         risk = _effective_risk_usd(data)
         current_r = float(pnl / risk) if np.isfinite(pnl) and risk > 0 else np.nan
+        symbol = data.get("cfd_symbol")
+        is_market = str(data.get("order_type") or "").upper() == "MARKET"
         open_rows.append({
-            "trade_id": data.get("trade_id"), "symbol": data.get("cfd_symbol"), "side": data.get("side"),
-            "entry": _effective_entry(data), "planned_entry": _finite(data.get("entry")), "stop": _finite(data.get("stop")), "target": _finite(data.get("target")),
+            "trade_id": data.get("trade_id"), "symbol": symbol, "side": data.get("side"),
+            "entry": mt5_price_to_plan(symbol, _effective_entry(data)),
+            "planned_entry": np.nan if is_market else _finite(data.get("entry")),
+            "stop": _finite(data.get("stop")), "target": _finite(data.get("target")),
             "lots": _finite(data.get("lots")), "risk_usd": risk, "risk_pct_at_plan": _finite(data.get("requested_risk_pct")),
-            "mark": mark, "floating_pnl": pnl, "current_r": current_r,
+            "mark": mt5_price_to_plan(symbol, mark), "floating_pnl": pnl, "current_r": current_r,
             "entry_time_utc": data.get("entry_time_utc"), "mark_time_utc": mark_time,
         })
     floating_pnl = float(sum(floating_values)) if floating_values else 0.0
@@ -470,7 +645,9 @@ def prop_desk_state(
             "trade_id": row.get("trade_id"), "symbol": row.get("cfd_symbol"), "side": row.get("side"),
             "exit_time_utc": row.get("exit_time_utc"), "result_r": _finite(row.get("result_r")),
             "realized_pnl": pnl, "lots": _finite(row.get("lots")), "risk_usd": _effective_risk_usd(row),
-            "entry": _effective_entry(row), "planned_entry": _finite(row.get("entry")), "fill_timeframe": row.get("fill_timeframe"),
+            "entry": mt5_price_to_plan(row.get("cfd_symbol"), _effective_entry(row)),
+            "planned_entry": np.nan if str(row.get("order_type") or "").upper() == "MARKET" else _finite(row.get("entry")),
+            "fill_timeframe": row.get("fill_timeframe"),
             "first_exit": row.get("first_exit"),
         })
     closed_rows.sort(key=lambda x: str(x.get("exit_time_utc") or ""), reverse=True)

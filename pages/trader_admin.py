@@ -61,7 +61,7 @@ page_header(
     "Admin · Multi-Trader",
     "Trader verwalten",
     "Getrennte Identitäten für gemeinsame Simulationen und spätere Research-Auswertung.",
-    "V3.8.1.5 · LIVE EXECUTION WATCHER",
+    "V3.8.1.5.1 · MARKET AUTO-FILL & PRICE UNITS",
 )
 
 active = int(pd.to_numeric(traders.get("active", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()) if not traders.empty else 0

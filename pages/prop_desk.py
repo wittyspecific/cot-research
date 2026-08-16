@@ -87,7 +87,7 @@ page_header(
     "Trading · Simulation",
     "Prop Desk",
     "Virtuelles Trading-Konto pro Trader: Balance, Equity, Floating/Realized P&L, Drawdown und Performance — ohne reale Orderausführung.",
-    "V3.8.1.5 · LIVE EXECUTION WATCHER",
+    "V3.8.1.5.1 · MARKET AUTO-FILL & PRICE UNITS",
 )
 
 if is_admin and not traders.empty:
@@ -237,6 +237,6 @@ if is_admin:
         )
 
 st.info(
-    "Accounting-Regel: Die virtuelle Lotgröße und das USD-Risk werden beim Speichern des SIMULATION-Plans eingefroren. "
-    "Spätere Balance-Änderungen verändern alte Trades nicht rückwirkend."
+    "Accounting-Regel: Das USD-Risk-Budget wird beim Speichern eingefroren. LIMIT-Lots werden sofort berechnet; "
+    "MARKET-Lots werden erst mit dem tatsächlichen MT5 Bid/Ask-Fill eingefroren. Spätere Balance-Änderungen verändern alte Trades nicht rückwirkend."
 )
