@@ -37,6 +37,7 @@ from src.trade_journal import (
     journal_summary,
     list_trade_plans,
     resolve_db_path,
+    void_trade_plan,
 )
 from src.trader_auth import (
     authenticate_trader,
@@ -48,7 +49,7 @@ from src.trader_auth import (
     set_trader_active,
 )
 
-VERSION = "3.8.1.2"
+VERSION = "3.8.1.3"
 MAX_BODY_BYTES = 8 * 1024 * 1024
 
 
@@ -223,7 +224,7 @@ class GatewayState:
 
 
 class GatewayHandler(BaseHTTPRequestHandler):
-    server_version = "COTJournalGateway/3.8.1.2"
+    server_version = "COTJournalGateway/3.8.1.3"
 
     @property
     def state(self) -> GatewayState:
@@ -532,6 +533,23 @@ class GatewayHandler(BaseHTTPRequestHandler):
                     return
                 event_id = append_trade_event(trade_id, event_type, payload or {}, source="USER", db_path=self.state.db_path)
                 self._send(201, {"event_id": event_id})
+                return
+            if len(parts) == 4 and parts[:2] == ["v1", "trades"] and parts[3] == "void":
+                trade_id = parts[2]
+                trader, _ = self._session_required()
+                if not trader:
+                    return
+                if not self.state.authorize_trade(trader, trade_id):
+                    self._error(403, "Kein Zugriff auf diesen Trade.")
+                    return
+                data = self._read_json()
+                result = void_trade_plan(
+                    trade_id,
+                    reason=str(data.get("reason", "") or ""),
+                    actor_trader_id=str(trader["trader_id"]),
+                    db_path=self.state.db_path,
+                )
+                self._send(200, result)
                 return
             if len(parts) == 5 and parts[:3] == ["v1", "admin", "traders"] and parts[4] == "prop-account":
                 target_id = parts[3]

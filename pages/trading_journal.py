@@ -20,6 +20,7 @@ from src.trade_journal import (
     journal_summary,
     list_trade_plans,
     resolve_db_path,
+    void_trade_plan,
 )
 from src.trader_auth import list_traders
 from src.tradingview_widget import render_tradingview_chart
@@ -58,7 +59,7 @@ page_header(
     "Trading · Journal",
     "Trading Journal",
     "Unveränderliche Trade-Pläne, getrennte Trader-Identitäten und automatisch berechnete Simulationsergebnisse.",
-    "V3.8.1.2 · MARKET FILL RESOLUTION",
+    "V3.8.1.3 · SAFE TRADE VOID",
 )
 
 deployment = deployment_config_from_mapping(_secret_section("deployment"))
@@ -103,6 +104,7 @@ context_strip([
     ("Pläne", str(summary.get("plans", 0))),
     ("Simulation", str(summary.get("simulation", 0))),
     ("Closed", str(summary.get("closed", 0))),
+    ("Verworfen", str(summary.get("voided", 0))),
 ])
 
 m1, m2, m3, m4 = st.columns(4)
@@ -177,7 +179,8 @@ with st.expander("Research / ML Feature-Matrix", expanded=False):
     else:
         matrix = build_feature_matrix(db_path=db_path, include_text=False, include_outcomes=True, trader_id=trader_filter_id)
         st.caption(
-            f"{len(matrix)} Trades × {len(matrix.columns)} Spalten. Plan-Time-Features beginnen mit feature__; spätere Zielvariablen mit label__."
+            f"{len(matrix)} gültige Trades × {len(matrix.columns)} Spalten. Verworfene Fehleinträge sind ausgeschlossen. "
+            "Plan-Time-Features beginnen mit feature__; spätere Zielvariablen mit label__."
         )
         if not matrix.empty:
             csv_data = matrix.to_csv(index=False).encode("utf-8")
@@ -185,6 +188,7 @@ with st.expander("Research / ML Feature-Matrix", expanded=False):
 
 section_line("Trade-Pläne", "REAL · SIMULATION · SKIPPED")
 filter_type = st.radio("Filter", ["ALLE", "REAL", "SIMULATION", "SKIPPED"], horizontal=True)
+show_voided = st.toggle("Verworfene Fehleinträge anzeigen", value=False, help="VOID-Pläne bleiben revisionssicher gespeichert, zählen aber nicht zu Statistik, Prop Desk, Outcome-Sync oder ML.")
 try:
     if is_remote:
         plans = remote_client.list_trade_plans(
@@ -202,6 +206,10 @@ try:
 except JournalGatewayError as exc:
     st.error(str(exc))
     st.stop()
+
+if not plans.empty and not show_voided:
+    _status_series = plans.get("lifecycle_status", pd.Series(index=plans.index, dtype=object)).fillna("PLANNED").astype(str).str.upper()
+    plans = plans.loc[~_status_series.eq("VOID")].copy()
 
 if plans.empty:
     st.info("Noch keine Trade-Pläne gespeichert.")
@@ -316,6 +324,40 @@ if outcome:
 with st.expander("Vollständigen eingefrorenen Snapshot anzeigen", expanded=False):
     st.json(snapshot, expanded=False)
 
+status_now = str(outcome.get("lifecycle_status") or "PLANNED").upper() if outcome else "PLANNED"
+triggered_now = bool(outcome.get("entry_triggered") or 0) if outcome else False
+owner_id = str(row.get("trader_id") or "")
+can_void = status_now == "PLANNED" and not triggered_now and (is_admin or owner_id == str(trader.get("trader_id") or ""))
+
+if can_void:
+    with st.expander("Fehleintrag verwerfen", expanded=False):
+        st.warning(
+            "Nur für echte Eingabefehler, z. B. falsches Asset, falsche Richtung oder falsche Levels. "
+            "Der Datensatz wird nicht gelöscht, sondern revisionssicher auf VOID gesetzt."
+        )
+        void_reason = st.selectbox(
+            "Grund",
+            ["Falsches Asset", "Falsche Richtung", "Falscher Entry / SL / TP", "Doppelter Eintrag", "Sonstiger Eingabefehler"],
+            key=f"void_reason_{selected_id}",
+        )
+        void_details = st.text_input("Optionaler Zusatz", key=f"void_details_{selected_id}", placeholder="kurze Erklärung")
+        confirm_void = st.checkbox("Ich bestätige: Der Trade wurde noch nicht ausgelöst und ist ein Fehleintrag.", key=f"void_confirm_{selected_id}")
+        if st.button("Fehleintrag verwerfen", type="secondary", disabled=not confirm_void, key=f"void_button_{selected_id}"):
+            reason_text = void_reason + (f" · {void_details.strip()}" if void_details.strip() else "")
+            try:
+                if is_remote:
+                    remote_client.void_trade_plan(selected_id, reason_text)
+                else:
+                    void_trade_plan(
+                        selected_id, reason=reason_text, actor_trader_id=str(trader.get("trader_id") or ""), db_path=db_path
+                    )
+                st.success("Fehleintrag wurde auf VOID gesetzt und aus Outcome-Sync, Prop Desk und ML ausgeschlossen.")
+                st.rerun()
+            except (JournalGatewayError, ValueError, PermissionError, KeyError) as exc:
+                st.error(str(exc))
+elif status_now == "VOID":
+    st.info("Dieser Plan wurde als Fehleintrag verworfen (VOID). Er bleibt nur für Audit/Nachvollziehbarkeit gespeichert.")
+
 section_line("Event-Log", "Änderungen werden angehängt, nicht überschrieben")
 if not events.empty:
     ev = events[["occurred_at_local", "event_type", "source", "payload_json"]].copy()
@@ -325,7 +367,7 @@ if not events.empty:
 with st.expander("Manuelles Event protokollieren", expanded=False):
     event_type = st.selectbox(
         "Event",
-        ["TRADE_TAKEN", "PLAN_CANCELLED", "ENTRY_CHANGED", "STOP_CHANGED", "TARGET_CHANGED", "MANUAL_EXIT", "NOTE"],
+        ["TRADE_TAKEN", "ENTRY_CHANGED", "STOP_CHANGED", "TARGET_CHANGED", "MANUAL_EXIT", "NOTE"],
     )
     payload_text = st.text_area("Details", placeholder="z. B. neuer SL, neuer Entry oder Begründung")
     if st.button("Event anhängen"):

@@ -701,3 +701,8 @@ Der Trade Planner und das Trading Journal unterstützen jetzt getrennte Trader-I
 Normale TRADER können Watchlist, Trade Planner, eigenes Trading Journal, Marktanalyse und Research verwenden. Risk Cockpit, Portfolio & Risk und FTMO-Kontodetails bleiben ADMIN-only. Alle Simulationen verwenden weiterhin dieselbe lokale read-only MT5-Kurshistorie für den Outcome Tracker.
 
 Die Passwörter werden nicht im Klartext gespeichert, sondern als PBKDF2-SHA256-Hash mit individuellem Salt in derselben persistenten lokalen SQLite-Datenbank. Die Trader-ID wird als Metadatum gespeichert und nicht automatisch als ML-Feature behandelt.
+
+
+## V3.8.1.3 · Safe Trade Void
+
+Trader können eigene, noch nicht ausgelöste `PLANNED`-Trades als **Fehleintrag verwerfen**. Der Plan/Snapshot bleibt unveränderlich in SQLite, bekommt aber den abgeleiteten Lifecycle `VOID` plus append-only `PLAN_VOIDED`-Event mit Begründung. VOID-Trades werden vom MT5-Outcome-Sync, Prop Desk, Journal-Kennzahlen und dem ML-Feature-Export ausgeschlossen. ADMINs dürfen im Ausnahmefall auch fremde PLANNED-Fehleinträge verwerfen.

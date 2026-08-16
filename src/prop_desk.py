@@ -302,7 +302,9 @@ def backfill_prop_allocations(trader_id: str, *, db_path: str | Path | None = No
             SELECT p.trade_id, p.created_at_utc
             FROM trade_plans p
             LEFT JOIN prop_trade_allocations a ON a.trade_id=p.trade_id
+            LEFT JOIN trade_outcomes o ON o.trade_id=p.trade_id
             WHERE p.trader_id=? AND p.plan_type='SIMULATION' AND a.trade_id IS NULL
+              AND COALESCE(o.lifecycle_status, 'PLANNED') <> 'VOID'
             ORDER BY p.created_at_utc, p.trade_id
             """,
             (str(trader_id),),

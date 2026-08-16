@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 
 
-JOURNAL_SCHEMA_VERSION = 5
+JOURNAL_SCHEMA_VERSION = 6
 SNAPSHOT_SCHEMA_VERSION = "1.0"
 
 
@@ -629,6 +629,92 @@ def append_trade_event(
     return event_id
 
 
+def void_trade_plan(
+    trade_id: str,
+    *,
+    reason: str,
+    actor_trader_id: str,
+    db_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Safely void an erroneous plan without deleting immutable research data.
+
+    Only a PLANNED, never-triggered trade may be voided. The owner may void their
+    own plan; ADMINs may void any plan. The plan/snapshot remain immutable, while
+    the derived lifecycle becomes VOID and an append-only PLAN_VOIDED event records
+    who did it and why.
+    """
+    path = initialize_journal(db_path)
+    clean_reason = str(reason or "").strip()
+    if len(clean_reason) < 3:
+        raise ValueError("Bitte einen kurzen Grund für den Fehleintrag angeben.")
+    actor_id = str(actor_trader_id or "").strip()
+    if not actor_id:
+        raise PermissionError("Trader-Sitzung fehlt.")
+
+    now_utc = _utc_now()
+    now_local = datetime.now().astimezone()
+    event_id = str(uuid.uuid4())
+    with journal_connection(path) as con:
+        row = con.execute(
+            """
+            SELECT p.trade_id, p.trader_id, p.cfd_symbol, p.side, p.plan_type,
+                   COALESCE(o.lifecycle_status, 'PLANNED') AS lifecycle_status,
+                   COALESCE(o.entry_triggered, 0) AS entry_triggered,
+                   t.role AS actor_role
+            FROM trade_plans p
+            LEFT JOIN trade_outcomes o ON o.trade_id=p.trade_id
+            LEFT JOIN traders t ON t.trader_id=?
+            WHERE p.trade_id=?
+            """,
+            (actor_id, str(trade_id)),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"Unbekannte trade_id: {trade_id}")
+        is_admin = str(row["actor_role"] or "").upper() == "ADMIN"
+        is_owner = str(row["trader_id"] or "") == actor_id
+        if not (is_owner or is_admin):
+            raise PermissionError("Du darfst nur eigene PLANNED-Trades verwerfen.")
+        status = str(row["lifecycle_status"] or "PLANNED").upper()
+        triggered = bool(row["entry_triggered"] or 0)
+        if status == "VOID":
+            raise ValueError("Dieser Trade wurde bereits als Fehleintrag verworfen.")
+        if status != "PLANNED" or triggered:
+            raise ValueError("Nur PLANNED-Trades ohne ausgelösten Entry dürfen verworfen werden.")
+
+        payload = {
+            "reason": clean_reason,
+            "actor_trader_id": actor_id,
+            "previous_status": status,
+            "symbol": row["cfd_symbol"],
+            "side": row["side"],
+            "plan_type": row["plan_type"],
+            "excluded_from_outcome_sync": True,
+            "excluded_from_prop_desk": True,
+            "excluded_from_ml": True,
+        }
+        con.execute(
+            """
+            INSERT INTO trade_outcomes(trade_id, last_evaluated_at_utc, lifecycle_status, entry_triggered, payload_json)
+            VALUES(?,?,?,?,?)
+            ON CONFLICT(trade_id) DO UPDATE SET
+                last_evaluated_at_utc=excluded.last_evaluated_at_utc,
+                lifecycle_status='VOID',
+                entry_triggered=0,
+                ambiguity_reason=NULL,
+                payload_json=excluded.payload_json
+            """,
+            (str(trade_id), _iso_utc(now_utc), "VOID", 0, canonical_json(payload)),
+        )
+        con.execute(
+            """
+            INSERT INTO trade_events(event_id, trade_id, occurred_at_utc, occurred_at_local, event_type, source, payload_json)
+            VALUES(?,?,?,?,?,?,?)
+            """,
+            (event_id, str(trade_id), _iso_utc(now_utc), _iso_local(now_local), "PLAN_VOIDED", "USER", canonical_json(payload)),
+        )
+    return {"trade_id": str(trade_id), "lifecycle_status": "VOID", "event_id": event_id, "reason": clean_reason}
+
+
 def upsert_trade_outcome(
     trade_id: str,
     outcome: Mapping[str, Any],
@@ -746,24 +832,28 @@ def journal_summary(*, db_path: str | Path | None = None, trader_id: str | None 
     plans = list_trade_plans(db_path=db_path, limit=100_000, trader_id=trader_id)
     if plans.empty:
         return {
-            "plans": 0, "real": 0, "simulation": 0, "skipped": 0,
+            "plans": 0, "real": 0, "simulation": 0, "skipped": 0, "voided": 0,
             "evaluated": 0, "expectancy_r": np.nan, "planned": 0, "active": 0,
             "closed": 0, "expired": 0, "ambiguous": 0,
         }
-    evaluated = pd.to_numeric(plans.get("result_r"), errors="coerce")
     statuses = plans.get("lifecycle_status", pd.Series(index=plans.index, dtype=object)).fillna("PLANNED").astype(str).str.upper()
+    valid_mask = ~statuses.eq("VOID")
+    valid = plans.loc[valid_mask].copy()
+    valid_statuses = statuses.loc[valid_mask]
+    evaluated = pd.to_numeric(valid.get("result_r"), errors="coerce")
     return {
-        "plans": int(len(plans)),
-        "real": int((plans["plan_type"] == "REAL").sum()),
-        "simulation": int((plans["plan_type"] == "SIMULATION").sum()),
-        "skipped": int((plans["plan_type"] == "SKIPPED").sum()),
+        "plans": int(len(valid)),
+        "real": int((valid["plan_type"] == "REAL").sum()),
+        "simulation": int((valid["plan_type"] == "SIMULATION").sum()),
+        "skipped": int((valid["plan_type"] == "SKIPPED").sum()),
+        "voided": int(statuses.eq("VOID").sum()),
         "evaluated": int(evaluated.notna().sum()),
         "expectancy_r": float(evaluated.mean()) if evaluated.notna().any() else np.nan,
-        "planned": int((statuses == "PLANNED").sum()),
-        "active": int((statuses == "ACTIVE").sum()),
-        "closed": int((statuses == "CLOSED").sum()),
-        "expired": int((statuses == "EXPIRED").sum()),
-        "ambiguous": int((statuses == "AMBIGUOUS").sum()),
+        "planned": int((valid_statuses == "PLANNED").sum()),
+        "active": int((valid_statuses == "ACTIVE").sum()),
+        "closed": int((valid_statuses == "CLOSED").sum()),
+        "expired": int((valid_statuses == "EXPIRED").sum()),
+        "ambiguous": int((valid_statuses == "AMBIGUOUS").sum()),
     }
 
 
@@ -773,6 +863,7 @@ def build_feature_matrix(
     include_text: bool = False,
     include_outcomes: bool = True,
     trader_id: str | None = None,
+    include_voided: bool = False,
 ) -> pd.DataFrame:
     """Build one ML/research row per trade without mutating stored snapshots.
 
@@ -790,11 +881,17 @@ def build_feature_matrix(
                    p.zone_freshness, p.retest_count, p.quality_grade, p.skip_reason
             FROM trade_plans p
             LEFT JOIN traders t ON t.trader_id=p.trader_id
+            LEFT JOIN trade_outcomes vo ON vo.trade_id=p.trade_id
         """
         plan_params: list[Any] = []
+        clauses: list[str] = []
         if trader_id:
-            plan_sql += " WHERE p.trader_id=?"
+            clauses.append("p.trader_id=?")
             plan_params.append(str(trader_id))
+        if not include_voided:
+            clauses.append("COALESCE(vo.lifecycle_status, 'PLANNED') <> 'VOID'")
+        if clauses:
+            plan_sql += " WHERE " + " AND ".join(clauses)
         plan_sql += " ORDER BY p.created_at_utc"
         plans = pd.read_sql_query(plan_sql, con, params=plan_params)
         features = pd.read_sql_query(

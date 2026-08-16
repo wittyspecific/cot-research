@@ -101,7 +101,7 @@ page_header(
     "Trading · Trade Planner",
     "Trade Planner",
     "Manuelle Supply-&-Demand-Idee eingeben; Research- und MT5-Kontext werden im selben Moment unveränderlich gespeichert.",
-    "V3.8.1.2 · MARKET FILL RESOLUTION",
+    "V3.8.1.3 · SAFE TRADE VOID",
 )
 
 st.caption(

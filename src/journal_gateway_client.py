@@ -213,6 +213,13 @@ class JournalGatewayClient:
         out = self._request("POST", f"/v1/trades/{quote(str(trade_id), safe='')}/events", json_body={"event_type": event_type, "payload": dict(payload or {})})
         return str((out or {}).get("event_id", ""))
 
+    def void_trade_plan(self, trade_id: str, reason: str) -> dict[str, Any]:
+        return dict(self._request(
+            "POST",
+            f"/v1/trades/{quote(str(trade_id), safe='')}/void",
+            json_body={"reason": str(reason)},
+        ) or {})
+
     def list_traders(self, *, active_only: bool = False) -> pd.DataFrame:
         payload = self._request("GET", "/v1/admin/traders", params={"active_only": int(bool(active_only))})
         return pd.DataFrame((payload or {}).get("rows", []))
