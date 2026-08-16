@@ -1,3 +1,7 @@
+## V3.8.1 · TradingView Preview
+
+Neu in dieser Version: Der Trade Planner und das Trading Journal können einen offiziellen TradingView Advanced Chart als visuelle Analyseoberfläche einblenden. TradingView bleibt bewusst vom MT5-Outcome-System getrennt; Entry/SL/TP, Prop-Desk und Outcome-Tracking verwenden weiterhin die Broker-/MT5-Daten.
+
 ## V3.8.0 · Prop Desk Simulator
 
 Jeder Trader besitzt jetzt ein getrenntes virtuelles Prop-Konto mit standardmäßig **200.000 USD Startkapital**. Nur `SIMULATION`-Trades wirken auf Balance/Equity. Beim Speichern werden damalige Balance, Risk-%, USD-Risk und virtuelle CFD-Lots unveränderlich eingefroren. `Trading → Prop Desk` zeigt Balance, Equity, Floating/Realized P&L, Return, Drawdown, Open Risk, Equity Curve, offene Positionen und geschlossene Trades; ADMIN erhält zusätzlich ein Desk-Ranking. Floating P&L wird beim Aufruf nur aus den lokal bereits verfügbaren MT5-Bridge-Quotes der ACTIVE-Symbole markiert und löst keine H1/M5/M1-History-Abfrage aus. Bestehende Simulationen werden beim ersten Prop-Desk-Aufruf chronologisch nachgezogen, soweit ihre Snapshots das Sizing erlauben. Details: `CHANGELOG_V380_PROP_DESK_SIMULATOR.md`.

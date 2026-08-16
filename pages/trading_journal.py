@@ -22,6 +22,7 @@ from src.trade_journal import (
     resolve_db_path,
 )
 from src.trader_auth import list_traders
+from src.tradingview_widget import render_tradingview_chart
 
 
 apply_style()
@@ -57,7 +58,7 @@ page_header(
     "Trading · Journal",
     "Trading Journal",
     "Unveränderliche Trade-Pläne, getrennte Trader-Identitäten und automatisch berechnete Simulationsergebnisse.",
-    "V3.8.0 · PROP DESK SIMULATOR",
+    "V3.8.1 · TRADINGVIEW PREVIEW",
 )
 
 deployment = deployment_config_from_mapping(_secret_section("deployment"))
@@ -245,6 +246,13 @@ with c3:
 with c4:
     status = str(row.get("lifecycle_status") or "PLANNED") if pd.notna(row.get("lifecycle_status")) else "PLANNED"
     metric_card("OUTCOME", status, _fmt_r(row.get("result_r")))
+
+with st.expander(f"TradingView Chart · {row['cfd_symbol']}", expanded=False):
+    tv_symbol = render_tradingview_chart(str(row["cfd_symbol"]), timeframe=str(row.get("timeframe") or "4H"), height=540)
+    st.caption(
+        f"TradingView-Mapping: {row['cfd_symbol']} → {tv_symbol}. Visueller Referenzchart; "
+        "der gespeicherte Trade und sein Outcome bleiben an die MT5-CFD-Historie gebunden."
+    )
 
 try:
     snapshot = remote_client.get_trade_snapshot(selected_id) if is_remote else get_trade_snapshot(selected_id, db_path=db_path)

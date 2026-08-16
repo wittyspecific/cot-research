@@ -24,6 +24,7 @@ from src.prop_desk import ensure_prop_account, realized_balance
 from src.trade_journal import create_trade_plan, initialize_journal, resolve_db_path
 from src.trade_context import all_markets, infer_cot_context
 from src.trade_snapshot import collect_trade_snapshot
+from src.tradingview_widget import render_tradingview_chart
 
 
 apply_style()
@@ -100,7 +101,7 @@ page_header(
     "Trading · Trade Planner",
     "Trade Planner",
     "Manuelle Supply-&-Demand-Idee eingeben; Research- und MT5-Kontext werden im selben Moment unveränderlich gespeichert.",
-    "V3.8.0 · PROP DESK SIMULATOR",
+    "V3.8.1 · TRADINGVIEW PREVIEW",
 )
 
 st.caption(
@@ -242,6 +243,15 @@ with c3:
         metric_card("TRADER", str(trader.get("display_name", "—")), "eigene Simulation / eigener Plan")
 with c4:
     metric_card("PLAN", plan_type, "REAL / SIMULATION / SKIPPED")
+
+section_line("TradingView Preview", "visuelle Analyse · MT5 bleibt Outcome-Quelle")
+with st.expander(f"TradingView Chart · {symbol}", expanded=True):
+    tv_symbol = render_tradingview_chart(symbol, timeframe=timeframe, height=570)
+    st.caption(
+        f"TradingView-Mapping: {symbol} → {tv_symbol}. Der Chart dient nur der visuellen Analyse. "
+        "Entry/SL/TP und spätere Outcomes werden weiterhin anhand des FTMO/MT5-CFDs gespeichert bzw. ausgewertet. "
+        "Falls das Broker-Symbol nicht exakt gemappt wird, kannst du oben im TradingView-Widget das Symbol manuell wechseln."
+    )
 
 with st.expander("COT-Zuordnung manuell überschreiben", expanded=False):
     override_enabled = st.checkbox("Manuelle COT-Zuordnung verwenden", value=False)
