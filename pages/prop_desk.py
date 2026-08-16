@@ -9,6 +9,7 @@ from src.deployment_mode import REMOTE_GATEWAY, deployment_config_from_mapping
 from src.journal_gateway_client import JournalGatewayClient, JournalGatewayError, config_from_mapping as gateway_config_from_mapping
 from src.mt5_account import MT5BridgeError, MT5ConfigError, MT5ConnectionError, MT5UnavailableError, config_from_mapping, get_mt5_snapshot
 from src.prop_desk import prop_desk_ranking, prop_desk_state
+from src.prop_gateway_compat import prop_desk as remote_prop_desk, prop_desk_ranking as remote_prop_desk_ranking
 from src.style import apply_style, context_strip, metric_card, page_header, plotly_config, section_line
 from src.trade_journal import initialize_journal, resolve_db_path
 from src.trader_auth import list_traders
@@ -86,7 +87,7 @@ page_header(
     "Trading · Simulation",
     "Prop Desk",
     "Virtuelles Trading-Konto pro Trader: Balance, Equity, Floating/Realized P&L, Drawdown und Performance — ohne reale Orderausführung.",
-    "V3.8.0 · PROP DESK SIMULATOR",
+    "V3.8.0.1 · PROP DESK GATEWAY HOTFIX",
 )
 
 if is_admin and not traders.empty:
@@ -103,7 +104,7 @@ if st.button("Prop Desk aktualisieren", icon=":material/refresh:"):
 
 try:
     if is_remote:
-        state = remote_client.prop_desk(trader_id=selected_trader_id if is_admin else None)
+        state = remote_prop_desk(remote_client, trader_id=selected_trader_id if is_admin else None)
     else:
         state = prop_desk_state(selected_trader_id, db_path=db_path, mt5_snapshot=mt5_snapshot)
 except (JournalGatewayError, Exception) as exc:
@@ -216,7 +217,7 @@ else:
 if is_admin:
     section_line("Prop Desk Ranking", "identische virtuelle Account-Logik je Trader")
     try:
-        ranking = remote_client.prop_desk_ranking() if is_remote else prop_desk_ranking(db_path=db_path, mt5_snapshot=mt5_snapshot)
+        ranking = remote_prop_desk_ranking(remote_client) if is_remote else prop_desk_ranking(db_path=db_path, mt5_snapshot=mt5_snapshot)
     except JournalGatewayError as exc:
         ranking = pd.DataFrame()
         st.warning(str(exc))

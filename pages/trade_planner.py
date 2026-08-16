@@ -9,6 +9,7 @@ import streamlit as st
 from src.deployment_mode import REMOTE_GATEWAY, deployment_config_from_mapping
 from src.ftmo_risk import risk_config_from_mapping
 from src.journal_gateway_client import JournalGatewayClient, JournalGatewayError, config_from_mapping as gateway_config_from_mapping
+from src.prop_gateway_compat import prop_account as remote_prop_account
 from src.mt5_account import (
     MT5BridgeError,
     MT5ConfigError,
@@ -141,7 +142,7 @@ prop_balance = np.nan
 try:
     trader_id = str(trader.get("trader_id", "") or "")
     if is_remote:
-        prop_info = remote_client.prop_account() if remote_client is not None else {}
+        prop_info = remote_prop_account(remote_client) if remote_client is not None else {}
         prop_account = dict(prop_info.get("account") or {})
         prop_balance = _finite(prop_info.get("balance"))
     elif trader_id:

@@ -5,6 +5,7 @@ import streamlit as st
 
 from src.deployment_mode import REMOTE_GATEWAY, deployment_config_from_mapping
 from src.journal_gateway_client import JournalGatewayClient, JournalGatewayError, config_from_mapping as gateway_config_from_mapping
+from src.prop_gateway_compat import prop_account as remote_prop_account, update_prop_account as remote_update_prop_account
 from src.style import apply_style, context_strip, metric_card, page_header, section_line
 from src.prop_desk import ensure_prop_account, update_prop_account
 from src.trade_journal import initialize_journal, resolve_db_path
@@ -159,7 +160,7 @@ if not traders.empty:
     section_line("Prop Desk Konto", "virtuelles Simulationskapital und Risk-Policy")
     try:
         if is_remote:
-            prop_info = remote_client.prop_account(trader_id=selected)
+            prop_info = remote_prop_account(remote_client, trader_id=selected)
             prop = dict(prop_info.get("account") or {})
         else:
             prop = ensure_prop_account(selected, db_path=db_path)
@@ -186,7 +187,8 @@ if not traders.empty:
                 st.error("Standard Risk darf nicht über dem Max Risk liegen.")
             else:
                 if is_remote:
-                    remote_client.update_prop_account(
+                    remote_update_prop_account(
+                        remote_client,
                         selected, starting_capital=prop_start, default_risk_pct=prop_default, max_risk_pct=prop_max, enabled=prop_enabled
                     )
                 else:
