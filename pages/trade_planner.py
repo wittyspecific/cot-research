@@ -19,6 +19,7 @@ from src.mt5_account import (
 )
 from src.style import apply_style, context_strip, definition, metric_card, page_header, section_line
 from src.mt5_symbols import openable_symbol_catalog, symbol_label_map
+from src.prop_desk import ensure_prop_account, realized_balance
 from src.trade_journal import create_trade_plan, initialize_journal, resolve_db_path
 from src.trade_context import all_markets, infer_cot_context
 from src.trade_snapshot import collect_trade_snapshot
@@ -98,7 +99,7 @@ page_header(
     "Trading · Trade Planner",
     "Trade Planner",
     "Manuelle Supply-&-Demand-Idee eingeben; Research- und MT5-Kontext werden im selben Moment unveränderlich gespeichert.",
-    "V3.7.0.1 · GATEWAY JSON HOTFIX",
+    "V3.8.0 · PROP DESK SIMULATOR",
 )
 
 st.caption(
@@ -134,6 +135,21 @@ except (MT5UnavailableError, MT5BridgeError, MT5ConnectionError, MT5ConfigError,
     else:
         st.caption("Für den Planner muss die bestehende MT5-Read-only-Bridge laufen.")
     st.stop()
+
+prop_account = {}
+prop_balance = np.nan
+try:
+    trader_id = str(trader.get("trader_id", "") or "")
+    if is_remote:
+        prop_info = remote_client.prop_account() if remote_client is not None else {}
+        prop_account = dict(prop_info.get("account") or {})
+        prop_balance = _finite(prop_info.get("balance"))
+    elif trader_id:
+        prop_account = ensure_prop_account(trader_id, db_path=db_path)
+        prop_balance = realized_balance(trader_id, db_path=db_path)
+except Exception:
+    prop_account = {}
+    prop_balance = np.nan
 
 account = mt5_snapshot.get("account", {})
 catalog = openable_symbol_catalog(mt5_snapshot.get("symbol_catalog", pd.DataFrame()))
@@ -216,7 +232,10 @@ with c1:
 with c2:
     metric_card("COT-ZUORDNUNG", _context_label(inferred), "automatisch erkannt")
 with c3:
-    if is_admin:
+    if plan_type == "SIMULATION" and prop_account:
+        prop_default = _finite(prop_account.get("default_risk_pct"), 0.005)
+        metric_card("PROP RISK", f"{prop_default * 100:.2f}%", f"Balance {_money(prop_balance, prop_account.get('currency', 'USD'))}")
+    elif is_admin:
         metric_card("TARGET RISK", f"{risk_cfg.target_trade_risk_pct * 100:.2f}%", _money(risk_cfg.initial_capital * risk_cfg.target_trade_risk_pct, currency))
     else:
         metric_card("TRADER", str(trader.get("display_name", "—")), "eigene Simulation / eigener Plan")
@@ -274,12 +293,20 @@ with x3:
 
 r1, r2, r3 = st.columns([1.0, 1.0, 1.4])
 with r1:
+    if plan_type == "SIMULATION" and prop_account:
+        default_risk_pct = _finite(prop_account.get("default_risk_pct"), 0.005)
+        max_risk_pct = _finite(prop_account.get("max_risk_pct"), 0.01)
+    else:
+        default_risk_pct = float(risk_cfg.target_trade_risk_pct)
+        max_risk_pct = 0.02
     requested_risk_pct = st.number_input(
         "Gewünschtes Risiko (%)",
         min_value=0.05,
-        max_value=2.00,
-        value=float(risk_cfg.target_trade_risk_pct * 100.0),
+        max_value=max(0.05, float(max_risk_pct * 100.0)),
+        value=min(float(default_risk_pct * 100.0), max(0.05, float(max_risk_pct * 100.0))),
         step=0.05,
+        key=f"requested_risk_pct_{plan_type}",
+        help="Bei SIMULATION wird daraus das unveränderliche USD-Risk-Budget des virtuellen Prop-Accounts berechnet.",
     ) / 100.0
 with r2:
     expiry_days = st.number_input(
@@ -374,6 +401,19 @@ if st.button("Trade-Plan + vollständigen Snapshot speichern", type="primary", u
         st.success(
             f"Gespeichert · {trader.get('display_name', 'Trader')} · {symbol} {side} · {plan_type} · {saved['feature_count']} Snapshot-Features · ID {saved['trade_id'][:8]}…"
         )
+        prop_allocation = dict(saved.get("prop_allocation") or {})
+        if plan_type == "SIMULATION":
+            if prop_allocation and prop_allocation.get("sizing_status") == "SIZED":
+                st.info(
+                    f"Prop Desk: {float(prop_allocation.get('lots', 0) or 0):g} virtuelle Lots · "
+                    f"{_money(prop_allocation.get('actual_risk'), prop_account.get('currency', 'USD'))} initiales Risiko · "
+                    f"Balance beim Plan {_money(prop_allocation.get('balance_at_plan'), prop_account.get('currency', 'USD'))}."
+                )
+            elif prop_allocation:
+                st.warning(f"Prop-Desk Positionsgröße nicht verfügbar: {prop_allocation.get('sizing_reason') or prop_allocation.get('sizing_status')}")
+            elif saved.get("prop_allocation_error"):
+                st.warning("Plan gespeichert, aber Prop-Allokation fehlgeschlagen: " + str(saved.get("prop_allocation_error")))
+
         risk = payload.get("risk", {}).get("pretrade_approval", {})
         if is_admin and not is_remote and risk:
             status = str(risk.get("status", "—"))

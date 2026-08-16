@@ -73,3 +73,7 @@ Lokaler persistenter History-Cache für den Outcome Tracker.
 `mt5_history_bars` speichert deduplizierte OHLC-Bars pro `symbol + timeframe + time_utc`. `mt5_history_coverage` speichert zusätzlich bereits geprüfte halb-offene Zeiträume `[start, end)`, auch wenn MT5 darin keine Bars geliefert hat (z. B. Wochenende/Marktschließung). Dadurch werden gleiche Zeiträume nicht bei jedem Sync erneut beim MT5-Terminal angefragt.
 
 Der reguläre Swing-Sync berücksichtigt nur `PLANNED` und `ACTIVE`. Mehrere Trades desselben Symbols teilen sich denselben Cache. H1 ist Standard; M5 und M1 werden nur bei Ambiguität nachgeladen. Laufende Kerzen gelten nicht als finale Cache-Coverage.
+
+## V3.8.0 · Prop Desk Tabellen
+
+`prop_accounts` speichert die prospektive virtuelle Account-Konfiguration je `trader_id` (Startkapital, Default/Max Risk, Aktiv-Flag). `prop_trade_allocations` speichert pro SIMULATION-Trade die unveränderliche virtuelle Sizing-Entscheidung: Balance zum Planzeitpunkt, Risk-Budget, Lots, Tick-Werte und Sizing-Status. Realized/Floating P&L wird daraus zusammen mit `trade_outcomes` abgeleitet; die unveränderlichen Research-Snapshots werden nicht verändert.

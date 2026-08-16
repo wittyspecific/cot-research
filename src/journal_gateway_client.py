@@ -171,6 +171,30 @@ class JournalGatewayClient:
         payload = self._request("GET", "/v1/trades", params=params)
         return pd.DataFrame((payload or {}).get("rows", []))
 
+    def prop_account(self, *, trader_id: str | None = None) -> dict[str, Any]:
+        params = {"trader_id": trader_id} if trader_id else {}
+        return dict(self._request("GET", "/v1/prop-account", params=params) or {})
+
+    def prop_desk(self, *, trader_id: str | None = None) -> dict[str, Any]:
+        params = {"trader_id": trader_id} if trader_id else {}
+        return dict(self._request("GET", "/v1/prop-desk", params=params) or {})
+
+    def prop_desk_ranking(self) -> pd.DataFrame:
+        payload = self._request("GET", "/v1/prop-desk/ranking")
+        return pd.DataFrame((payload or {}).get("rows", []))
+
+    def update_prop_account(self, trader_id: str, *, starting_capital: float, default_risk_pct: float, max_risk_pct: float, enabled: bool = True) -> dict[str, Any]:
+        return dict(self._request(
+            "POST",
+            f"/v1/admin/traders/{quote(str(trader_id), safe='')}/prop-account",
+            json_body={
+                "starting_capital": float(starting_capital),
+                "default_risk_pct": float(default_risk_pct),
+                "max_risk_pct": float(max_risk_pct),
+                "enabled": bool(enabled),
+            },
+        ) or {})
+
     def journal_summary(self, *, trader_id: str | None = None) -> dict[str, Any]:
         params = {"trader_id": trader_id} if trader_id else {}
         return dict(self._request("GET", "/v1/journal/summary", params=params) or {})

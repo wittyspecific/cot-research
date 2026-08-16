@@ -6,6 +6,7 @@ import streamlit as st
 from src.deployment_mode import REMOTE_GATEWAY, deployment_config_from_mapping
 from src.journal_gateway_client import JournalGatewayClient, JournalGatewayError, config_from_mapping as gateway_config_from_mapping
 from src.style import apply_style, context_strip, metric_card, page_header, section_line
+from src.prop_desk import ensure_prop_account, update_prop_account
 from src.trade_journal import initialize_journal, resolve_db_path
 from src.trader_auth import (
     change_own_password,
@@ -59,7 +60,7 @@ page_header(
     "Admin · Multi-Trader",
     "Trader verwalten",
     "Getrennte Identitäten für gemeinsame Simulationen und spätere Research-Auswertung.",
-    "V3.7.0.1 · GATEWAY JSON HOTFIX",
+    "V3.8.0 · PROP DESK SIMULATOR",
 )
 
 active = int(pd.to_numeric(traders.get("active", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()) if not traders.empty else 0
@@ -154,6 +155,49 @@ if not traders.empty:
                 st.success("Passwort wurde neu gesetzt.")
             except Exception as exc:
                 st.error(str(exc))
+
+    section_line("Prop Desk Konto", "virtuelles Simulationskapital und Risk-Policy")
+    try:
+        if is_remote:
+            prop_info = remote_client.prop_account(trader_id=selected)
+            prop = dict(prop_info.get("account") or {})
+        else:
+            prop = ensure_prop_account(selected, db_path=db_path)
+        pc1, pc2, pc3, pc4 = st.columns(4)
+        with pc1:
+            prop_start = st.number_input(
+                "Startkapital (USD)", min_value=1_000.0, max_value=10_000_000.0,
+                value=float(prop.get("starting_capital", 200_000.0)), step=10_000.0, key=f"prop_start_{selected}"
+            )
+        with pc2:
+            prop_default = st.number_input(
+                "Standard Risk (%)", min_value=0.05, max_value=5.0,
+                value=float(prop.get("default_risk_pct", 0.005))*100.0, step=0.05, key=f"prop_default_{selected}"
+            ) / 100.0
+        with pc3:
+            prop_max = st.number_input(
+                "Max Risk / Trade (%)", min_value=0.05, max_value=5.0,
+                value=float(prop.get("max_risk_pct", 0.01))*100.0, step=0.05, key=f"prop_max_{selected}"
+            ) / 100.0
+        with pc4:
+            prop_enabled = st.checkbox("Prop Desk aktiv", value=bool(prop.get("enabled", 1)), key=f"prop_enabled_{selected}")
+        if st.button("Prop Desk Einstellungen speichern", key=f"save_prop_{selected}"):
+            if prop_default > prop_max:
+                st.error("Standard Risk darf nicht über dem Max Risk liegen.")
+            else:
+                if is_remote:
+                    remote_client.update_prop_account(
+                        selected, starting_capital=prop_start, default_risk_pct=prop_default, max_risk_pct=prop_max, enabled=prop_enabled
+                    )
+                else:
+                    update_prop_account(
+                        selected, starting_capital=prop_start, default_risk_pct=prop_default, max_risk_pct=prop_max, enabled=prop_enabled, db_path=db_path
+                    )
+                st.success("Prop Desk Einstellungen gespeichert. Änderungen am Risk gelten nur für neue Trades.")
+                st.rerun()
+        st.caption("Sobald der erste Prop-Trade allokiert wurde, ist das Startkapital gesperrt. So bleiben historische Lots und USD-Risiken unveränderlich.")
+    except Exception as exc:
+        st.warning(f"Prop Desk Konto konnte nicht geladen werden: {exc}")
 
 section_line("Eigenes Passwort", "ADMIN-Konto")
 with st.form("own_password"):

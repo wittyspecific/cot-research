@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 
 
-JOURNAL_SCHEMA_VERSION = 4
+JOURNAL_SCHEMA_VERSION = 5
 SNAPSHOT_SCHEMA_VERSION = "1.0"
 
 
@@ -567,6 +567,22 @@ def create_trade_plan(
             (str(uuid.uuid4()), trade_id, _iso_utc(now_utc), _iso_local(local_now), "PLAN_CREATED", "SYSTEM", "{}"),
         )
 
+    prop_allocation = None
+    prop_allocation_error = None
+    if p.get("plan_type") == "SIMULATION" and trader_id:
+        try:
+            from .prop_desk import create_prop_allocation
+            prop_allocation = create_prop_allocation(
+                trade_id=trade_id, trader_id=str(trader_id), plan=p, snapshot_payload=payload, db_path=path
+            )
+        except Exception as exc:
+            # The immutable research plan must remain saved even when virtual sizing
+            # is temporarily unavailable. The dashboard surfaces this explicitly.
+            prop_allocation_error = str(exc)
+            append_trade_event(
+                trade_id, "PROP_ALLOCATION_ERROR", {"error": prop_allocation_error}, source="SYSTEM", db_path=path
+            )
+
     return {
         "trade_id": trade_id,
         "snapshot_id": snapshot_id,
@@ -574,6 +590,8 @@ def create_trade_plan(
         "feature_count": len(features),
         "db_path": str(path),
         "plan": p,
+        "prop_allocation": prop_allocation,
+        "prop_allocation_error": prop_allocation_error,
     }
 
 

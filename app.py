@@ -47,7 +47,7 @@ else:
 
 def _login_screen_local():
     st.title("◆ COT Research")
-    st.caption("V3.7.0.1 · GATEWAY JSON HOTFIX · Multi-Trader")
+    st.caption("V3.8.0 · PROP DESK SIMULATOR · Multi-Trader")
     if trader_count(db_path=db_path) == 0:
         st.subheader("Erstes Admin-Konto anlegen")
         st.info("Dieses Konto übernimmt automatisch alle bereits vorhandenen Journal-Trades ohne Trader-Zuordnung.")
@@ -98,7 +98,7 @@ def _login_screen_local():
 def _login_screen_remote():
     assert remote_client is not None
     st.title("◆ COT Research")
-    st.caption("V3.7.0.1 · ONLINE PLANNER · JSON-safe Gateway")
+    st.caption("V3.8.0 · ONLINE PROP DESK · Local Gateway")
     st.subheader("Trader Login")
     st.caption("Die Anmeldung wird verschlüsselt an dein lokales Journal-Gateway weitergereicht; die Trader-Datenbank bleibt auf dem Mac.")
     with st.form("trader_login_remote"):
@@ -174,6 +174,7 @@ if is_admin:
             ],
             "TRADING": [
                 st.Page("pages/trade_planner.py", title="Trade Planner", icon=":material/edit_note:"),
+                st.Page("pages/prop_desk.py", title="Prop Desk", icon=":material/monitoring:"),
                 st.Page("pages/trading_journal.py", title="Trading Journal", icon=":material/menu_book:"),
             ],
             "MARKT & PORTFOLIO": [
@@ -196,6 +197,7 @@ if is_admin:
             ],
             "TRADING": [
                 st.Page("pages/trade_planner.py", title="Trade Planner", icon=":material/edit_note:"),
+                st.Page("pages/prop_desk.py", title="Prop Desk", icon=":material/monitoring:"),
                 st.Page("pages/trading_journal.py", title="Trading Journal", icon=":material/menu_book:"),
             ],
             "MARKTANALYSE": [
@@ -217,6 +219,7 @@ else:
         ],
         "TRADING": [
             st.Page("pages/trade_planner.py", title="Trade Planner", icon=":material/edit_note:"),
+            st.Page("pages/prop_desk.py", title="Prop Desk", icon=":material/monitoring:"),
             st.Page("pages/trading_journal.py", title="Trading Journal", icon=":material/menu_book:"),
         ],
         "MARKTANALYSE": [

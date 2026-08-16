@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.mt5_account import config_from_mapping as mt5_config_from_mapping, get_mt5_snapshot
+from src.prop_desk import ensure_prop_account, prop_desk_ranking, prop_desk_state, realized_balance, update_prop_account
 from src.trade_journal import (
     append_trade_event,
     create_trade_plan,
@@ -47,7 +48,7 @@ from src.trader_auth import (
     set_trader_active,
 )
 
-VERSION = "3.7.0.1"
+VERSION = "3.8.0"
 MAX_BODY_BYTES = 8 * 1024 * 1024
 
 
@@ -222,7 +223,7 @@ class GatewayState:
 
 
 class GatewayHandler(BaseHTTPRequestHandler):
-    server_version = "COTJournalGateway/3.7.0.1"
+    server_version = "COTJournalGateway/3.8.0"
 
     @property
     def state(self) -> GatewayState:
@@ -330,6 +331,47 @@ class GatewayHandler(BaseHTTPRequestHandler):
                     "privacy_scope": "SYMBOL_METADATA_ONLY_NO_LIVE_QUOTES",
                 }
                 self._send(200, payload)
+                return
+            if path == "/v1/prop-account":
+                trader, _ = self._session_required()
+                if not trader:
+                    return
+                requested = (query.get("trader_id") or [None])[0]
+                if str(trader.get("role", "")).upper() == "ADMIN" and requested:
+                    target_id = str(requested)
+                else:
+                    target_id = str(trader.get("trader_id", ""))
+                account = ensure_prop_account(target_id, db_path=self.state.db_path)
+                self._send(200, {"account": account, "balance": realized_balance(target_id, db_path=self.state.db_path)})
+                return
+            if path == "/v1/prop-desk":
+                trader, _ = self._session_required()
+                if not trader:
+                    return
+                requested = (query.get("trader_id") or [None])[0]
+                if str(trader.get("role", "")).upper() == "ADMIN" and requested:
+                    target_id = str(requested)
+                else:
+                    target_id = str(trader.get("trader_id", ""))
+                mt5_snapshot = None
+                try:
+                    cfg = mt5_config_from_mapping(self.state.mt5_cfg)
+                    mt5_snapshot = get_mt5_snapshot(cfg)
+                except Exception:
+                    mt5_snapshot = None
+                self._send(200, prop_desk_state(target_id, db_path=self.state.db_path, mt5_snapshot=mt5_snapshot))
+                return
+            if path == "/v1/prop-desk/ranking":
+                trader, _ = self._admin_required()
+                if not trader:
+                    return
+                mt5_snapshot = None
+                try:
+                    cfg = mt5_config_from_mapping(self.state.mt5_cfg)
+                    mt5_snapshot = get_mt5_snapshot(cfg)
+                except Exception:
+                    mt5_snapshot = None
+                self._send(200, {"rows": prop_desk_ranking(db_path=self.state.db_path, mt5_snapshot=mt5_snapshot)})
                 return
             if path == "/v1/journal/summary":
                 trader, _ = self._session_required()
@@ -490,6 +532,22 @@ class GatewayHandler(BaseHTTPRequestHandler):
                     return
                 event_id = append_trade_event(trade_id, event_type, payload or {}, source="USER", db_path=self.state.db_path)
                 self._send(201, {"event_id": event_id})
+                return
+            if len(parts) == 5 and parts[:3] == ["v1", "admin", "traders"] and parts[4] == "prop-account":
+                target_id = parts[3]
+                trader, _ = self._admin_required()
+                if not trader:
+                    return
+                data = self._read_json()
+                updated = update_prop_account(
+                    target_id,
+                    starting_capital=data.get("starting_capital"),
+                    default_risk_pct=data.get("default_risk_pct"),
+                    max_risk_pct=data.get("max_risk_pct"),
+                    enabled=data.get("enabled"),
+                    db_path=self.state.db_path,
+                )
+                self._send(200, updated)
                 return
             if len(parts) == 5 and parts[:3] == ["v1", "admin", "traders"] and parts[4] in {"active", "reset-password"}:
                 target_id, action = parts[3], parts[4]

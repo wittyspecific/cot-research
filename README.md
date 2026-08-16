@@ -1,3 +1,7 @@
+## V3.8.0 · Prop Desk Simulator
+
+Jeder Trader besitzt jetzt ein getrenntes virtuelles Prop-Konto mit standardmäßig **200.000 USD Startkapital**. Nur `SIMULATION`-Trades wirken auf Balance/Equity. Beim Speichern werden damalige Balance, Risk-%, USD-Risk und virtuelle CFD-Lots unveränderlich eingefroren. `Trading → Prop Desk` zeigt Balance, Equity, Floating/Realized P&L, Return, Drawdown, Open Risk, Equity Curve, offene Positionen und geschlossene Trades; ADMIN erhält zusätzlich ein Desk-Ranking. Floating P&L wird beim Aufruf nur aus den lokal bereits verfügbaren MT5-Bridge-Quotes der ACTIVE-Symbole markiert und löst keine H1/M5/M1-History-Abfrage aus. Bestehende Simulationen werden beim ersten Prop-Desk-Aufruf chronologisch nachgezogen, soweit ihre Snapshots das Sizing erlauben. Details: `CHANGELOG_V380_PROP_DESK_SIMULATOR.md`.
+
 ## V3.7.0.1 · Gateway JSON NaN Hotfix
 
 Remote Trade-Plans normalisieren optionale `NaN`/`Infinity`/`pd.NA`-Werte vor HTTPS-JSON jetzt zu `null`, damit Research-Snapshots auch bei fehlenden Einzelmetriken zuverlässig gespeichert werden.
