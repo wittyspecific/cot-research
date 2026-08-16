@@ -47,7 +47,7 @@ else:
 
 def _login_screen_local():
     st.title("◆ COT Research")
-    st.caption("V3.7.0 · ONLINE/LOCAL GATEWAY · Multi-Trader")
+    st.caption("V3.7.0.1 · GATEWAY JSON HOTFIX · Multi-Trader")
     if trader_count(db_path=db_path) == 0:
         st.subheader("Erstes Admin-Konto anlegen")
         st.info("Dieses Konto übernimmt automatisch alle bereits vorhandenen Journal-Trades ohne Trader-Zuordnung.")
@@ -98,7 +98,7 @@ def _login_screen_local():
 def _login_screen_remote():
     assert remote_client is not None
     st.title("◆ COT Research")
-    st.caption("V3.7.0 · ONLINE PLANNER · Local Journal Gateway")
+    st.caption("V3.7.0.1 · ONLINE PLANNER · JSON-safe Gateway")
     st.subheader("Trader Login")
     st.caption("Die Anmeldung wird verschlüsselt an dein lokales Journal-Gateway weitergereicht; die Trader-Datenbank bleibt auf dem Mac.")
     with st.form("trader_login_remote"):

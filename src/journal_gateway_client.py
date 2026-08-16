@@ -1,15 +1,65 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime
+import math
+from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import quote
 
+import numpy as np
 import pandas as pd
 import requests
 
 
 class JournalGatewayError(RuntimeError):
     pass
+
+
+def _json_safe(value: Any) -> Any:
+    """Convert Python/pandas/numpy values into strict RFC-compliant JSON values.
+
+    The remote planner snapshot contains optional analytics where pandas naturally
+    represents missing values as NaN. requests rejects NaN/Infinity in strict JSON,
+    so normalize them to JSON null before any gateway request is serialized.
+    """
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, (np.bool_,)):
+        return bool(value)
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        v = float(value)
+        return v if math.isfinite(v) else None
+    if isinstance(value, (pd.Timestamp, datetime, date)):
+        try:
+            if pd.isna(value):
+                return None
+        except (TypeError, ValueError):
+            pass
+        return value.isoformat()
+    if isinstance(value, pd.Timedelta):
+        return value.isoformat()
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, pd.DataFrame):
+        return [_json_safe(row) for row in value.to_dict(orient="records")]
+    if isinstance(value, pd.Series):
+        return {str(k): _json_safe(v) for k, v in value.to_dict().items()}
+    if isinstance(value, Mapping):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(v) for v in value]
+    try:
+        missing = pd.isna(value)
+        if isinstance(missing, (bool, np.bool_)) and bool(missing):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return str(value)
 
 
 @dataclass(frozen=True)
@@ -60,18 +110,22 @@ class JournalGatewayClient:
 
     def _request(self, method: str, path: str, *, auth: bool = True, params: Mapping[str, Any] | None = None, json_body: Any = None) -> Any:
         url = f"{self.config.base_url}{path}"
+        safe_params = _json_safe(dict(params or {}))
+        safe_json_body = _json_safe(json_body) if json_body is not None else None
         try:
             response = requests.request(
                 method,
                 url,
                 headers=self._headers(auth=auth),
-                params=dict(params or {}),
-                json=json_body,
+                params=safe_params,
+                json=safe_json_body,
                 timeout=self.config.timeout_seconds,
                 verify=self.config.verify_tls,
             )
         except requests.RequestException as exc:
             raise JournalGatewayError(f"Lokales Journal-Gateway nicht erreichbar: {exc}") from exc
+        except (TypeError, ValueError) as exc:
+            raise JournalGatewayError(f"Gateway-Request konnte nicht als JSON serialisiert werden: {exc}") from exc
         try:
             payload = response.json()
         except ValueError:

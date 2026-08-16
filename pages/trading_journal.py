@@ -57,7 +57,7 @@ page_header(
     "Trading · Journal",
     "Trading Journal",
     "Unveränderliche Trade-Pläne, getrennte Trader-Identitäten und automatisch berechnete Simulationsergebnisse.",
-    "V3.7.0 · ONLINE/LOCAL GATEWAY",
+    "V3.7.0.1 · GATEWAY JSON HOTFIX",
 )
 
 deployment = deployment_config_from_mapping(_secret_section("deployment"))

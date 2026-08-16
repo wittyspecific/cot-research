@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import threading
 
+import numpy as np
 import pandas as pd
 
 from gateway import journal_gateway as gw
@@ -155,6 +157,43 @@ def test_planner_context_has_symbol_metadata_but_no_live_quotes(tmp_path: Path, 
         assert pd.isna(context["symbol_catalog"].iloc[0]["last"])
         assert "123456" not in str(context)
         assert "PRIVATE" not in str(context)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_remote_create_trade_normalizes_non_finite_snapshot_values_to_null(tmp_path: Path, monkeypatch):
+    db, server, thread, client = _start_gateway(tmp_path, monkeypatch)
+    try:
+        trader = create_trader(username="nantrader", display_name="NaN Trader", password="Password123!", db_path=db)
+        auth = client.login("nantrader", "Password123!")
+        authed = client.with_token(auth["token"])
+
+        snapshot = {
+            "research": {
+                "missing_float": float("nan"),
+                "positive_inf": float("inf"),
+                "negative_inf": float("-inf"),
+                "numpy_nan": np.float64(np.nan),
+                "nested": [1.0, np.float64(np.nan), {"pd_missing": pd.NA}],
+            },
+            "meta": {"captured_at": pd.Timestamp("2026-08-16T10:00:00Z")},
+        }
+        # The exact payload sent by the client must be strict JSON compliant.
+        from src.journal_gateway_client import _json_safe
+        json.dumps(_json_safe({"plan": _plan(), "snapshot_payload": snapshot}), allow_nan=False)
+
+        saved = authed.create_trade_plan(_plan(), snapshot)
+        assert saved["trade_id"]
+        remote_snapshot = authed.get_trade_snapshot(saved["trade_id"])
+        research = remote_snapshot["research"]
+        assert research["missing_float"] is None
+        assert research["positive_inf"] is None
+        assert research["negative_inf"] is None
+        assert research["numpy_nan"] is None
+        assert research["nested"][1] is None
+        assert research["nested"][2]["pd_missing"] is None
     finally:
         server.shutdown()
         server.server_close()

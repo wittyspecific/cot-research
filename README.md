@@ -1,3 +1,7 @@
+## V3.7.0.1 · Gateway JSON NaN Hotfix
+
+Remote Trade-Plans normalisieren optionale `NaN`/`Infinity`/`pd.NA`-Werte vor HTTPS-JSON jetzt zu `null`, damit Research-Snapshots auch bei fehlenden Einzelmetriken zuverlässig gespeichert werden.
+
 ## V3.7.0 · Online Planner / Local Journal Gateway
 
 Dieselbe Codebasis kann jetzt in zwei Modi laufen: `LOCAL` auf dem Mac und `REMOTE_GATEWAY` als Online-Streamlit-App. Online-Login, Trade Planner, Journal und Trader-Verwaltung sprechen über ein authentifiziertes HTTPS-Gateway direkt mit der lokalen Master-SQLite. MT5, FTMO-Kontodaten, Outcome-Sync und H1→M5→M1-Historie bleiben ausschließlich lokal. Der Remote Planner erhält nur Broker-Symbolmetadaten; Live-Bid/Ask/Last, Account, Positionen und Portfolio-Risk werden nicht in die Cloud übertragen. Einrichtung: `ONLINE_DEPLOYMENT.md`.

@@ -59,7 +59,7 @@ page_header(
     "Admin · Multi-Trader",
     "Trader verwalten",
     "Getrennte Identitäten für gemeinsame Simulationen und spätere Research-Auswertung.",
-    "V3.7.0 · ONLINE/LOCAL GATEWAY",
+    "V3.7.0.1 · GATEWAY JSON HOTFIX",
 )
 
 active = int(pd.to_numeric(traders.get("active", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()) if not traders.empty else 0

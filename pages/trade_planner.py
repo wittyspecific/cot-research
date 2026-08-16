@@ -98,7 +98,7 @@ page_header(
     "Trading · Trade Planner",
     "Trade Planner",
     "Manuelle Supply-&-Demand-Idee eingeben; Research- und MT5-Kontext werden im selben Moment unveränderlich gespeichert.",
-    "V3.7.0 · ONLINE/LOCAL GATEWAY",
+    "V3.7.0.1 · GATEWAY JSON HOTFIX",
 )
 
 st.caption(

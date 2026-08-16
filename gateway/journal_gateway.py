@@ -47,7 +47,7 @@ from src.trader_auth import (
     set_trader_active,
 )
 
-VERSION = "3.7.0"
+VERSION = "3.7.0.1"
 MAX_BODY_BYTES = 8 * 1024 * 1024
 
 
@@ -222,7 +222,7 @@ class GatewayState:
 
 
 class GatewayHandler(BaseHTTPRequestHandler):
-    server_version = "COTJournalGateway/3.7.0"
+    server_version = "COTJournalGateway/3.7.0.1"
 
     @property
     def state(self) -> GatewayState:
