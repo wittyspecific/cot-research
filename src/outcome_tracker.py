@@ -12,7 +12,7 @@ import pandas as pd
 from .mt5_account import MT5Config
 from .mt5_history import HistoryRequest, MT5HistoryError, history_batch
 from .mt5_history_cache import ensure_history_time_basis, load_cached_bars, merge_missing_requests, missing_intervals, store_history_segment
-from .trade_journal import list_trade_plans, upsert_trade_outcome
+from .trade_journal import get_trade_outcome, list_trade_plans, upsert_trade_outcome
 
 
 TRACKER_VERSION = "1.3"
@@ -593,6 +593,45 @@ def _history_window(
     return start, max(start + delta, end)
 
 
+
+def _guard_active_state_regression(
+    trade_id: str,
+    previous_status: Any,
+    candidate: Mapping[str, Any],
+    *,
+    db_path: str | Path | None = None,
+) -> tuple[dict[str, Any], bool]:
+    """Never let missing/incomplete history demote a confirmed ACTIVE trade.
+
+    Outcome sync is a reconstruction pass. A temporary lack of completed bars must
+    not erase a previously confirmed fill. ACTIVE may progress to CLOSED or to an
+    explicit AMBIGUOUS result, but it may never regress to PLANNED/EXPIRED.
+    """
+    old = str(previous_status or "PLANNED").upper()
+    new = str(candidate.get("lifecycle_status", "PLANNED") or "PLANNED").upper()
+    if old != "ACTIVE" or new not in {"PLANNED", "EXPIRED"}:
+        return dict(candidate), False
+
+    previous = get_trade_outcome(trade_id, db_path=db_path)
+    payload = previous.get("payload") if isinstance(previous, Mapping) else None
+    preserved: dict[str, Any] = dict(payload) if isinstance(payload, Mapping) else {}
+    if isinstance(previous, Mapping):
+        for key, value in previous.items():
+            if key in {"payload", "payload_json", "trade_id", "last_evaluated_at_utc"}:
+                continue
+            if value is not None and not (isinstance(value, float) and pd.isna(value)):
+                preserved[key] = value
+
+    # Defensive fallback for tests/legacy rows where no payload is available.
+    preserved.setdefault("execution_price", candidate.get("execution_price"))
+    preserved.setdefault("entry_time_utc", candidate.get("entry_time_utc"))
+    preserved.setdefault("fill_timeframe", candidate.get("fill_timeframe"))
+    preserved["tracker_version"] = TRACKER_VERSION
+    preserved["lifecycle_status"] = "ACTIVE"
+    preserved["entry_triggered"] = 1
+    preserved["state_guard_reason"] = f"BLOCKED_ACTIVE_TO_{new}"
+    return preserved, True
+
 def sync_trade_outcomes(
     config: MT5Config,
     *,
@@ -786,8 +825,14 @@ def sync_trade_outcomes(
 
     updated = 0
     ambiguous = 0
+    regressions_blocked = 0
     status_counts: dict[str, int] = {}
     for trade_id, outcome in outcomes.items():
+        previous_status = plan_by_trade.get(trade_id, {}).get("lifecycle_status", "PLANNED")
+        outcome, blocked = _guard_active_state_regression(
+            trade_id, previous_status, outcome, db_path=db_path
+        )
+        regressions_blocked += int(blocked)
         status = str(outcome.get("lifecycle_status", "PLANNED"))
         status_counts[status] = status_counts.get(status, 0) + 1
         ambiguous += int(status == "AMBIGUOUS")
@@ -798,6 +843,7 @@ def sync_trade_outcomes(
         "checked": len(plans),
         "updated": updated,
         "ambiguous": ambiguous,
+        "state_regressions_blocked": regressions_blocked,
         "status_counts": status_counts,
         "errors": [],
         "symbols_checked": len({str(value) for value in plans["cfd_symbol"].dropna().tolist()}),

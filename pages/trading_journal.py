@@ -59,7 +59,7 @@ page_header(
     "Trading · Journal",
     "Trading Journal",
     "Unveränderliche Trade-Pläne, getrennte Trader-Identitäten und automatisch berechnete Simulationsergebnisse.",
-    "V3.8.1.4 · MT5 HISTORY TIMEZONE FIX",
+    "V3.8.1.4.1 · OUTCOME STATE GUARD",
 )
 
 deployment = deployment_config_from_mapping(_secret_section("deployment"))

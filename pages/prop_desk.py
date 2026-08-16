@@ -87,7 +87,7 @@ page_header(
     "Trading · Simulation",
     "Prop Desk",
     "Virtuelles Trading-Konto pro Trader: Balance, Equity, Floating/Realized P&L, Drawdown und Performance — ohne reale Orderausführung.",
-    "V3.8.1.4 · MT5 HISTORY TIMEZONE FIX",
+    "V3.8.1.4.1 · OUTCOME STATE GUARD",
 )
 
 if is_admin and not traders.empty:

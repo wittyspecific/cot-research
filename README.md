@@ -710,3 +710,8 @@ Trader können eigene, noch nicht ausgelöste `PLANNED`-Trades als **Fehleintrag
 ## V3.8.1.4 · MT5 History Timezone Fix
 
 The local MT5 bridge now treats journal/history request timestamps as UTC at the Python boundary, translates them to the MetaTrader trade-server clock for MQL5 `CopyRates()`, and converts returned server-clock bar timestamps back to UTC before caching. On FTMO MT4/MT5 the bridge follows the documented GMT+2 / GMT+3 US-DST platform-time convention. The first bridge outcome sync after this upgrade resets only the local MT5 history cache so previously misaligned coverage is rebuilt cleanly.
+
+
+## V3.8.1.4.1 · Outcome State Guard
+
+Der Outcome Tracker verwendet eine monotone Zustandsregel: Ein bereits bestätigter `ACTIVE`-Trade kann bei späteren Synchronisationen nicht mehr wegen fehlender/noch unvollständiger History auf `PLANNED` oder `EXPIRED` zurückfallen. Der letzte bestätigte Fill und die bisherigen Outcome-Metriken bleiben erhalten.
