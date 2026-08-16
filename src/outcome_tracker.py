@@ -17,7 +17,8 @@ from .trade_journal import get_trade_outcome, list_trade_plans, upsert_trade_out
 
 TRACKER_VERSION = "1.3"
 PRIMARY_TIMEFRAME = "H1"
-MARKET_FILL_TIMEFRAMES = ("M15", "M5", "M1")
+MARKET_FILL_TIMEFRAMES = ("M1",)
+MARKET_FILL_SUPPORTED = {"M15", "M5", "M1"}
 RESOLUTION_TIMEFRAMES = ("M5", "M1")
 FORWARD_DAYS = (1, 3, 5, 10, 20, 40, 60)
 
@@ -126,7 +127,7 @@ def resolve_market_fill(
     mid-minute. For a closed-market gap, the first future bar open is the fill.
     """
     tf = str(timeframe or "M15").upper()
-    if tf not in MARKET_FILL_TIMEFRAMES:
+    if tf not in MARKET_FILL_SUPPORTED:
         raise ValueError(f"Nicht unterstützter MARKET-Fill-Timeframe: {tf}")
     if str(plan.get("order_type", "LIMIT") or "LIMIT").upper() != "MARKET":
         raise ValueError("resolve_market_fill ist nur für MARKET-Pläne gedacht.")
@@ -215,13 +216,21 @@ def resolve_market_fill(
     return base
 
 
-def _effective_market_plan(plan: Mapping[str, Any], fill: Mapping[str, Any]) -> dict[str, Any]:
+def _effective_resolved_entry_plan(plan: Mapping[str, Any], fill: Mapping[str, Any]) -> dict[str, Any]:
+    """Replay exits from an already-resolved live/history entry without re-triggering it."""
     effective = dict(plan)
     effective["entry"] = float(fill["execution_price"])
     effective["created_at_utc"] = str(fill["entry_time_utc"])
-    effective["_resolved_market_fill"] = True
-    effective["_market_fill_timeframe"] = str(fill.get("fill_timeframe") or "")
+    effective["_resolved_entry_fill"] = True
+    effective["_entry_fill_source"] = str(fill.get("fill_timeframe") or "")
+    if str(plan.get("order_type", "LIMIT") or "LIMIT").upper() == "MARKET":
+        effective["_resolved_market_fill"] = True
+        effective["_market_fill_timeframe"] = str(fill.get("fill_timeframe") or "")
     return effective
+
+
+def _effective_market_plan(plan: Mapping[str, Any], fill: Mapping[str, Any]) -> dict[str, Any]:
+    return _effective_resolved_entry_plan(plan, fill)
 
 
 def evaluate_trade_path(plan: Mapping[str, Any], bars: pd.DataFrame, *, timeframe: str = PRIMARY_TIMEFRAME, now: Any | None = None) -> dict[str, Any]:
@@ -268,36 +277,55 @@ def evaluate_trade_path(plan: Mapping[str, Any], bars: pd.DataFrame, *, timefram
         "plus_3r_time_utc": None,
     }
 
+    resolved_fill = bool(plan.get("_resolved_entry_fill", False) or plan.get("_resolved_market_fill", False))
+    resolved_source = str(plan.get("_entry_fill_source") or plan.get("_market_fill_timeframe") or "") or None
+
     if data.empty:
-        if expiry is not None and now_ts >= expiry:
+        if resolved_fill:
+            base.update({
+                "lifecycle_status": "ACTIVE",
+                "entry_triggered": 1,
+                "entry_time_utc": _iso(created),
+                "execution_price": entry,
+                "fill_timeframe": resolved_source,
+                # With no new completed bar there is no new excursion information.
+                # Preserve already accumulated values instead of silently resetting them.
+                "mae_r": _finite(plan.get("mae_r")) if _finite(plan.get("mae_r")) is not None else 0.0,
+                "mfe_r": _finite(plan.get("mfe_r")) if _finite(plan.get("mfe_r")) is not None else 0.0,
+                "holding_minutes": max(
+                    _finite(plan.get("holding_minutes")) or 0.0,
+                    max(0.0, (now_ts - created).total_seconds() / 60.0),
+                ),
+            })
+        elif expiry is not None and now_ts >= expiry:
             base["lifecycle_status"] = "EXPIRED"
         return base
 
     first_partial = bool(data.iloc[0].get("_plan_start_partial", False))
     bar_delta = _timeframe_delta(timeframe)
 
-    if order_type == "MARKET":
+    if resolved_fill:
         entry_idx = 0
         entry_time = created
-        resolved_fill = bool(plan.get("_resolved_market_fill", False))
-        if resolved_fill:
-            base["execution_price"] = entry
-            base["fill_timeframe"] = str(plan.get("_market_fill_timeframe") or "") or None
-            # The coarse bar containing an already-resolved fill may contain price
-            # action from before the fill. Only refine if an exit level is also
-            # touched inside that partial bar; otherwise skip its extrema later.
-            if first_partial:
-                first = data.iloc[0]
-                if _touches_stop(side, first, stop) or _touches_target(side, first, target):
-                    base.update({
-                        "lifecycle_status": "AMBIGUOUS",
-                        "ambiguity_reason": "MARKET_EXIT_IN_PARTIAL_START_BAR",
-                        "ambiguous_bar_time_utc": _iso(first["time"]),
-                        "entry_triggered": 1,
-                        "entry_time_utc": _iso(created),
-                    })
-                    return base
-        else:
+        base["execution_price"] = entry
+        base["fill_timeframe"] = resolved_source
+        # A coarse bar containing an already-resolved live/history fill can also
+        # contain pre-fill price action. Refine only when an exit level is touched.
+        if first_partial:
+            first = data.iloc[0]
+            if _touches_stop(side, first, stop) or _touches_target(side, first, target):
+                base.update({
+                    "lifecycle_status": "AMBIGUOUS",
+                    "ambiguity_reason": "RESOLVED_ENTRY_EXIT_IN_PARTIAL_START_BAR",
+                    "ambiguous_bar_time_utc": _iso(first["time"]),
+                    "entry_triggered": 1,
+                    "entry_time_utc": _iso(created),
+                })
+                return base
+    elif order_type == "MARKET":
+        entry_idx = 0
+        entry_time = created
+        if not resolved_fill:
             if first_partial and timeframe != "M1":
                 base.update({
                     "lifecycle_status": "AMBIGUOUS",
@@ -388,7 +416,12 @@ def evaluate_trade_path(plan: Mapping[str, Any], bars: pd.DataFrame, *, timefram
     # For a LIMIT order, the entry bar contains price action from before the fill.
     # If no exit threshold was touched there, skip its extrema rather than polluting
     # MAE/MFE with pre-entry movement. Same-bar exits were already marked ambiguous.
-    loop_start = int(entry_idx) + (1 if order_type == "LIMIT" else (1 if first_partial else 0))
+    if resolved_fill:
+        loop_start = int(entry_idx) + (1 if first_partial else 0)
+    elif order_type == "LIMIT":
+        loop_start = int(entry_idx) + 1
+    else:
+        loop_start = int(entry_idx) + (1 if first_partial else 0)
     for idx in range(loop_start, len(data)):
         row = data.iloc[idx]
         bar_time = _utc(row["time"])
@@ -593,7 +626,6 @@ def _history_window(
     return start, max(start + delta, end)
 
 
-
 def _guard_active_state_regression(
     trade_id: str,
     previous_status: Any,
@@ -622,7 +654,6 @@ def _guard_active_state_regression(
             if value is not None and not (isinstance(value, float) and pd.isna(value)):
                 preserved[key] = value
 
-    # Defensive fallback for tests/legacy rows where no payload is available.
     preserved.setdefault("execution_price", candidate.get("execution_price"))
     preserved.setdefault("entry_time_utc", candidate.get("entry_time_utc"))
     preserved.setdefault("fill_timeframe", candidate.get("fill_timeframe"))
@@ -631,6 +662,7 @@ def _guard_active_state_regression(
     preserved["entry_triggered"] = 1
     preserved["state_guard_reason"] = f"BLOCKED_ACTIVE_TO_{new}"
     return preserved, True
+
 
 def sync_trade_outcomes(
     config: MT5Config,
@@ -643,8 +675,9 @@ def sync_trade_outcomes(
 ) -> dict[str, Any]:
     """Catch up journal outcomes from MT5 history. No order/trade operation is used.
 
-    LIMIT plans use H1 as the primary Swing timeframe. MARKET plans first resolve
-    their simulated fill with M15 -> M5 -> M1 and then rejoin the normal H1 path.
+    LIMIT plans use H1 as the primary Swing timeframe. MARKET plans are normally
+    filled by the local live-tick watcher; if that watcher was offline, the history
+    safety net resolves the first executable fill with M1 before rejoining H1.
     """
     now_ts = _utc(now or datetime.now(timezone.utc))
     cache_time_basis_reset = False
@@ -678,20 +711,20 @@ def sync_trade_outcomes(
         entry_time = plan.get("entry_time_utc")
         triggered_raw = plan.get("entry_triggered")
         triggered = False if triggered_raw is None or pd.isna(triggered_raw) else bool(triggered_raw)
-        if order_type == "MARKET" and triggered and execution is not None and entry_time not in (None, "") and not pd.isna(entry_time):
+        if triggered and execution is not None and entry_time not in (None, "") and not pd.isna(entry_time):
             fill = {
                 "execution_price": execution,
                 "entry_time_utc": str(entry_time),
-                "fill_timeframe": str(plan.get("fill_timeframe") or "M15"),
+                "fill_timeframe": str(plan.get("fill_timeframe") or ("M15" if order_type == "MARKET" else PRIMARY_TIMEFRAME)),
             }
-            effective_plan_by_trade[trade_id] = _effective_market_plan(plan, fill)
+            effective_plan_by_trade[trade_id] = _effective_resolved_entry_plan(plan, fill)
         elif order_type == "MARKET":
             market_pending.add(trade_id)
         else:
             effective_plan_by_trade[trade_id] = plan
 
-    # MARKET fills: M15 normally, M5/M1 only when the save timestamp lies inside
-    # the coarser bar. Closed-market plans naturally wait for the first future bar.
+    # MARKET history safety net: direct M1. The normal real-time path is LIVE_TICK;
+    # M1 is used only if the watcher was offline or missed the entry.
     for fill_tf in MARKET_FILL_TIMEFRAMES:
         unresolved = sorted(market_pending)
         if not unresolved:
@@ -722,8 +755,7 @@ def sync_trade_outcomes(
                 outcomes[trade_id] = resolve_market_fill(
                     plan_by_trade[trade_id], pd.DataFrame(), timeframe=fill_tf, now=now_ts
                 )
-                # Wait for the first completed M15 bar rather than immediately
-                # falling down to smaller timeframes during the still-forming bar.
+                # Wait for the first completed M1 bar after the plan timestamp.
                 continue
             rid = next((key for key, value in request_to_trade.items() if value == trade_id), None)
             fill = resolve_market_fill(

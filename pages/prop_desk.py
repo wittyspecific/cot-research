@@ -87,7 +87,7 @@ page_header(
     "Trading · Simulation",
     "Prop Desk",
     "Virtuelles Trading-Konto pro Trader: Balance, Equity, Floating/Realized P&L, Drawdown und Performance — ohne reale Orderausführung.",
-    "V3.8.1.4.1 · OUTCOME STATE GUARD",
+    "V3.8.1.5 · LIVE EXECUTION WATCHER",
 )
 
 if is_admin and not traders.empty:

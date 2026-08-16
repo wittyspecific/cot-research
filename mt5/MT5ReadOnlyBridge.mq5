@@ -1,5 +1,5 @@
 #property strict
-#property version   "3.814"
+#property version   "3.815"
 #property description "Read-only account/position/risk/history export for COT Research."
 #property description "Contains no OrderSend, trade modification or close logic."
 
@@ -11,6 +11,8 @@ datetime g_last_symbol_catalog_export = 0;
 string ACCOUNT_FILE   = "cot_mt5_account.csv";
 string POSITIONS_FILE = "cot_mt5_positions.csv";
 string SYMBOLS_FILE   = "cot_mt5_symbols.csv";
+string QUOTE_WATCH_FILE = "cot_mt5_quote_watch.csv";
+string QUOTES_FILE      = "cot_mt5_quotes.csv";
 
 // Returns the beginning of the current FTMO/MT5 server day. FTMO documents
 // MetaTrader server time as GMT+2 + DST, i.e. the CE(S)T day boundary used by
@@ -249,6 +251,7 @@ void ExportLiveSnapshot()
 {
    WriteAccountSnapshot();
    WritePositionsSnapshot();
+   WriteWatchedQuotes();
 }
 
 void MaybeRefreshSymbolCatalog(bool force=false)
@@ -346,6 +349,63 @@ long ServerDatetimeToUtcUnix(datetime server_time)
          return std_candidate;
    }
    return (long)server_time-measured;
+}
+
+void WriteWatchedQuotes()
+{
+   int out=FileOpen(
+      QUOTES_FILE,
+      FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ,
+      ';'
+   );
+   if(out==INVALID_HANDLE)
+      return;
+
+   FileWrite(out, "symbol", "bid", "ask", "last", "quote_time_server_unix", "exported_at_utc_unix", "tick_age_seconds", "trade_mode", "can_open");
+
+   int watch=FileOpen(QUOTE_WATCH_FILE, FILE_READ|FILE_CSV|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ, ';');
+   if(watch!=INVALID_HANDLE)
+   {
+      if(!FileIsEnding(watch))
+         FileReadString(watch); // header: symbol
+      while(!FileIsEnding(watch))
+      {
+         string symbol=FileReadString(watch);
+         StringTrimLeft(symbol);
+         StringTrimRight(symbol);
+         if(symbol=="")
+            continue;
+         SymbolSelect(symbol, true);
+         MqlTick tick={};
+         if(!SymbolInfoTick(symbol, tick))
+            continue;
+         ENUM_SYMBOL_TRADE_MODE trade_mode=(ENUM_SYMBOL_TRADE_MODE)SymbolInfoInteger(symbol, SYMBOL_TRADE_MODE);
+         bool can_open=(trade_mode==SYMBOL_TRADE_MODE_FULL ||
+                        trade_mode==SYMBOL_TRADE_MODE_LONGONLY ||
+                        trade_mode==SYMBOL_TRADE_MODE_SHORTONLY);
+         datetime server_now=TimeTradeServer();
+         if(server_now<=0)
+            server_now=TimeCurrent();
+         long tick_age_seconds=(long)server_now-(long)tick.time;
+         if(tick_age_seconds<0)
+            tick_age_seconds=0;
+         FileWrite(
+            out,
+            symbol,
+            tick.bid,
+            tick.ask,
+            tick.last,
+            (long)tick.time,
+            (long)TimeGMT(),
+            tick_age_seconds,
+            (long)trade_mode,
+            (long)can_open
+         );
+      }
+      FileClose(watch);
+   }
+   FileFlush(out);
+   FileClose(out);
 }
 
 void WriteHistoryError(string request_id, string message)
@@ -464,7 +524,7 @@ int OnInit()
 {
    int seconds=MathMax(1, RefreshSeconds);
    EventSetTimer(seconds);
-   Print("COT MT5 Bridge V3.6.1 active. Full broker CFD catalog + read-only history service. Common data path: ", TerminalInfoString(TERMINAL_COMMONDATA_PATH));
+   Print("COT MT5 Bridge V3.8.1.5 active. Read-only quotes + history service. Common data path: ", TerminalInfoString(TERMINAL_COMMONDATA_PATH));
    ExportLiveSnapshot();
    MaybeRefreshSymbolCatalog(true);
    ProcessHistoryRequests();

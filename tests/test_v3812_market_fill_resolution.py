@@ -55,7 +55,7 @@ def test_market_fill_after_closed_market_uses_first_future_m15_open():
     assert out["fill_timeframe"] == "M15"
 
 
-def test_mid_bar_market_fill_refines_m15_to_m5_to_next_full_m1(monkeypatch):
+def test_market_history_safety_net_uses_direct_m1_fill(monkeypatch):
     plans = pd.DataFrame([_market_plan()])
     calls: list[list[str]] = []
     saved = {}
@@ -90,14 +90,14 @@ def test_mid_bar_market_fill_refines_m15_to_m5_to_next_full_m1(monkeypatch):
 
     tracker.sync_trade_outcomes(MT5Config(mode="bridge"), db_path=None, now="2026-08-16T11:00:00Z")
     flat = [tf for batch in calls for tf in batch]
-    assert flat[:4] == ["M15", "M5", "M1", "H1"]
+    assert flat[:2] == ["M1", "H1"]
     assert saved["market-1"]["lifecycle_status"] == "ACTIVE"
     assert saved["market-1"]["execution_price"] == 100.25
     assert pd.Timestamp(saved["market-1"]["entry_time_utc"]) == pd.Timestamp("2026-08-16T10:18:00Z")
     assert saved["market-1"]["fill_timeframe"] == "M1"
 
 
-def test_market_on_exact_m15_boundary_does_not_need_m5_or_m1(monkeypatch):
+def test_market_history_safety_net_does_not_request_m15_or_m5(monkeypatch):
     plans = pd.DataFrame([_market_plan(created_at_utc="2026-08-16T10:15:00Z")])
     calls = []
     saved = {}
@@ -107,7 +107,7 @@ def test_market_on_exact_m15_boundary_does_not_need_m5_or_m1(monkeypatch):
         calls.extend(r.timeframe for r in reqs)
         out = {}
         for r in reqs:
-            if r.timeframe == "M15":
+            if r.timeframe == "M1":
                 out[r.request_id] = _bars([("2026-08-16T10:15:00Z", 100.2, 101.0, 99.5, 100.5)])
             elif r.timeframe == "H1":
                 out[r.request_id] = _bars([("2026-08-16T10:00:00Z", 100.0, 104.0, 96.0, 102.0)])
@@ -120,20 +120,20 @@ def test_market_on_exact_m15_boundary_does_not_need_m5_or_m1(monkeypatch):
     monkeypatch.setattr(tracker, "upsert_trade_outcome", lambda trade_id, outcome, **kwargs: saved.setdefault(trade_id, outcome))
 
     tracker.sync_trade_outcomes(MT5Config(mode="bridge"), db_path=None, now="2026-08-16T11:00:00Z")
-    assert calls[0] == "M15"
-    assert "M5" not in calls and "M1" not in calls
+    assert calls[0] == "M1"
+    assert "M15" not in calls and "M5" not in calls
     assert saved["market-1"]["execution_price"] == 100.2
-    assert saved["market-1"]["fill_timeframe"] == "M15"
+    assert saved["market-1"]["fill_timeframe"] == "M1"
 
 
-def test_market_waits_until_first_m15_bar_is_complete(monkeypatch):
+def test_market_waits_until_first_m1_bar_is_complete(monkeypatch):
     plans = pd.DataFrame([_market_plan()])
     saved = {}
     monkeypatch.setattr(tracker, "list_trade_plans", lambda **kwargs: plans)
     monkeypatch.setattr(tracker, "history_batch", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no completed M15 -> no MT5 request")))
     monkeypatch.setattr(tracker, "upsert_trade_outcome", lambda trade_id, outcome, **kwargs: saved.setdefault(trade_id, outcome))
 
-    result = tracker.sync_trade_outcomes(MT5Config(mode="bridge"), db_path=None, now="2026-08-16T10:28:00Z")
+    result = tracker.sync_trade_outcomes(MT5Config(mode="bridge"), db_path=None, now="2026-08-16T10:17:50Z")
     assert result["remote_requests"] == 0
     assert saved["market-1"]["lifecycle_status"] == "PLANNED"
 

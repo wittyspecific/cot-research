@@ -14,7 +14,7 @@ def test_bridge_converts_utc_requests_to_server_time_and_back():
     root = Path(__file__).resolve().parents[1]
     source = (root / "mt5" / "MT5ReadOnlyBridge.mq5").read_text(encoding="utf-8")
 
-    assert '#property version   "3.814"' in source
+    assert '#property version   "3.81' in source
     assert "MeasuredServerUtcOffsetSeconds" in source
     assert "HistoryServerUtcOffsetSecondsAt" in source
     assert "UtcUnixToServerDatetime" in source

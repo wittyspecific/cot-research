@@ -59,7 +59,7 @@ page_header(
     "Trading · Journal",
     "Trading Journal",
     "Unveränderliche Trade-Pläne, getrennte Trader-Identitäten und automatisch berechnete Simulationsergebnisse.",
-    "V3.8.1.4.1 · OUTCOME STATE GUARD",
+    "V3.8.1.5 · LIVE EXECUTION WATCHER",
 )
 
 deployment = deployment_config_from_mapping(_secret_section("deployment"))
@@ -117,7 +117,7 @@ with m3:
 with m4:
     metric_card("EXPIRED / ?", f"{summary.get('expired', 0)} / {summary.get('ambiguous', 0)}", "nicht ausgelöst / intrabar unklar")
 
-section_line("Outcome Tracker", "LIMIT H1 → M5 → M1 · MARKET Fill M15 → M5 → M1, danach H1")
+section_line("Outcome Tracker", "Live Entry alle ~2s · History-Safety-Net: MARKET M1 · danach H1 → M5 → M1")
 
 if is_remote:
     st.info(
@@ -139,7 +139,7 @@ else:
                 f"{result.get('checked', 0)} offene Pläne geprüft · {result.get('symbols_checked', 0)} CFD-Symbole · "
                 f"{result.get('remote_requests', 0)} neue MT5-History-Anfragen · "
                 f"H1 {by_tf.get('H1', 0)} Bars / {req_tf.get('H1', 0)} Requests · "
-                f"MARKET-Fill M15 {req_tf.get('M15', 0)} · M5 {req_tf.get('M5', 0)} · M1 {req_tf.get('M1', 0)}"
+                f"MARKET-Safety-Net M1 {req_tf.get('M1', 0)} · Exit-Fallback M5/M1"
             )
             st.caption(
                 f"Status nach Sync: PLANNED {counts.get('PLANNED', 0)} · ACTIVE {counts.get('ACTIVE', 0)} · "
@@ -151,7 +151,7 @@ else:
             st.rerun()
         except (MT5ConfigError, MT5UnavailableError, MT5BridgeError, MT5ConnectionError, MT5HistoryError, ValueError) as exc:
             st.error(str(exc))
-            st.caption("Für den Outcome Tracker muss die lokale MT5-Bridge laufen. LIMIT bleibt H1-first. MARKET-Fills werden mit M15 aufgelöst und nur bei Bedarf über M5/M1 verfeinert; danach läuft das normale H1-Tracking.")
+            st.caption("Der lokale Gateway-Watcher kann MARKET- und LIMIT-Entries über frische Bid/Ask-Quotes sofort aktivieren. Der History-Sync bleibt das Sicherheitsnetz: MARKET-Fills werden bei Bedarf mit M1 rekonstruiert; danach läuft das normale H1-Tracking mit M5/M1 nur bei Ambiguität.")
 
     auto_sync = st.toggle("Beim ersten Öffnen des Journals automatisch nachholen", value=False, help="Für Swing Trading ist manueller Sync sinnvoll. Aus: nur auf Knopfdruck synchronisieren.")
     if st.button("MT5 Outcomes jetzt synchronisieren", type="primary", use_container_width=True):

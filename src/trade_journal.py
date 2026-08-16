@@ -715,6 +715,87 @@ def void_trade_plan(
     return {"trade_id": str(trade_id), "lifecycle_status": "VOID", "event_id": event_id, "reason": clean_reason}
 
 
+def activate_simulation_trade_live(
+    trade_id: str,
+    fill: Mapping[str, Any],
+    *,
+    db_path: str | Path | None = None,
+) -> bool:
+    """Atomically activate one PLANNED SIMULATION trade from a read-only live quote."""
+    path = initialize_journal(db_path)
+    f = dict(fill or {})
+    now_utc = _utc_now()
+    now_local = datetime.now().astimezone()
+    event_id = str(uuid.uuid4())
+    with journal_connection(path) as con:
+        # Serialize the read->activate decision against a simultaneous manual
+        # history sync so LIVE_TICK can never overwrite a status that progressed.
+        con.execute("BEGIN IMMEDIATE")
+        row = con.execute(
+            """
+            SELECT p.plan_type, COALESCE(o.lifecycle_status, 'PLANNED') AS lifecycle_status,
+                   COALESCE(o.entry_triggered, 0) AS entry_triggered
+            FROM trade_plans p
+            LEFT JOIN trade_outcomes o ON o.trade_id=p.trade_id
+            WHERE p.trade_id=?
+            """,
+            (str(trade_id),),
+        ).fetchone()
+        if row is None:
+            return False
+        if str(row["plan_type"] or "").upper() != "SIMULATION":
+            return False
+        if str(row["lifecycle_status"] or "PLANNED").upper() != "PLANNED" or bool(row["entry_triggered"] or 0):
+            return False
+
+        payload = canonical_json(f)
+        con.execute(
+            """
+            INSERT INTO trade_outcomes(
+                trade_id, last_evaluated_at_utc, lifecycle_status, ambiguity_reason, data_timeframe,
+                entry_triggered, entry_time_utc, execution_price, fill_timeframe, mae_r, mfe_r,
+                holding_minutes, payload_json
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(trade_id) DO UPDATE SET
+                last_evaluated_at_utc=excluded.last_evaluated_at_utc,
+                lifecycle_status=excluded.lifecycle_status,
+                ambiguity_reason=excluded.ambiguity_reason,
+                data_timeframe=excluded.data_timeframe,
+                entry_triggered=excluded.entry_triggered,
+                entry_time_utc=excluded.entry_time_utc,
+                execution_price=excluded.execution_price,
+                fill_timeframe=excluded.fill_timeframe,
+                mae_r=excluded.mae_r,
+                mfe_r=excluded.mfe_r,
+                holding_minutes=excluded.holding_minutes,
+                payload_json=excluded.payload_json
+            """,
+            (
+                str(trade_id), _iso_utc(now_utc), "ACTIVE", None, str(f.get("data_timeframe") or "LIVE_TICK"),
+                1, f.get("entry_time_utc"), f.get("execution_price"), str(f.get("fill_timeframe") or "LIVE_TICK"),
+                f.get("mae_r", 0.0), f.get("mfe_r", 0.0), f.get("holding_minutes", 0.0), payload,
+            ),
+        )
+        event_payload = {
+            "execution_price": f.get("execution_price"),
+            "fill_source": str(f.get("fill_timeframe") or "LIVE_TICK"),
+            "trigger": f.get("live_trigger"),
+            "bid": f.get("live_bid"),
+            "ask": f.get("live_ask"),
+            "quote_exported_at_utc": f.get("quote_exported_at_utc"),
+            "tick_age_seconds": f.get("tick_age_seconds"),
+            "watcher_version": f.get("tracker_version"),
+        }
+        con.execute(
+            """
+            INSERT INTO trade_events(event_id, trade_id, occurred_at_utc, occurred_at_local, event_type, source, payload_json)
+            VALUES(?,?,?,?,?,?,?)
+            """,
+            (event_id, str(trade_id), _iso_utc(now_utc), _iso_local(now_local), "ENTRY_TRIGGERED_LIVE", "MT5_BRIDGE", canonical_json(event_payload)),
+        )
+    return True
+
+
 def upsert_trade_outcome(
     trade_id: str,
     outcome: Mapping[str, Any],

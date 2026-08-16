@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.mt5_account import config_from_mapping as mt5_config_from_mapping, get_mt5_snapshot
+from src.live_execution import LiveExecutionWatcher
 from src.prop_desk import ensure_prop_account, prop_desk_ranking, prop_desk_state, realized_balance, update_prop_account
 from src.trade_journal import (
     append_trade_event,
@@ -49,7 +50,7 @@ from src.trader_auth import (
     set_trader_active,
 )
 
-VERSION = "3.8.1.4.1"
+VERSION = "3.8.1.5"
 MAX_BODY_BYTES = 8 * 1024 * 1024
 
 
@@ -145,6 +146,8 @@ class GatewayState:
         self.journal_cfg = dict(secrets_data.get("journal", {}) or {})
         self.mt5_cfg = dict(secrets_data.get("mt5", {}) or {})
         self.gateway_cfg = dict(secrets_data.get("gateway", {}) or {})
+        self.execution_watcher_cfg = dict(secrets_data.get("execution_watcher", {}) or {})
+        self.execution_watcher = None
         self.db_path = resolve_db_path(self.journal_cfg)
         initialize_journal(self.db_path)
         _ensure_session_schema(self.db_path)
@@ -224,7 +227,7 @@ class GatewayState:
 
 
 class GatewayHandler(BaseHTTPRequestHandler):
-    server_version = "COTJournalGateway/3.8.1.4.1"
+    server_version = "COTJournalGateway/3.8.1.5"
 
     @property
     def state(self) -> GatewayState:
@@ -300,7 +303,11 @@ class GatewayHandler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         try:
             if path == "/v1/health":
-                self._send(200, {"ok": True, "version": VERSION, "service": "COT Journal Gateway"})
+                payload = {"ok": True, "version": VERSION, "service": "COT Journal Gateway"}
+                watcher = getattr(self.state, "execution_watcher", None)
+                if watcher is not None:
+                    payload["execution_watcher"] = watcher.status()
+                self._send(200, payload)
                 return
             if path == "/v1/auth/me":
                 trader, _ = self._session_required()
@@ -601,18 +608,41 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1", help="Default 127.0.0.1; expose externally only through an HTTPS tunnel/reverse proxy.")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--secrets", default=str(ROOT / ".streamlit" / "secrets.toml"))
+    parser.add_argument("--no-execution-watcher", action="store_true", help="Disable the local simulated execution watcher.")
     args = parser.parse_args()
 
     state = GatewayState(secrets_path=Path(args.secrets).expanduser().resolve())
+    watcher = None
+    if not args.no_execution_watcher and state.mt5_cfg:
+        watcher_cfg = state.execution_watcher_cfg
+        enabled = bool(watcher_cfg.get("enabled", True))
+        if enabled:
+            try:
+                interval = max(1.0, float(watcher_cfg.get("interval_seconds", 2.0)))
+                max_age = max(3.0, float(watcher_cfg.get("max_tick_age_seconds", 5.0)))
+                watcher = LiveExecutionWatcher(
+                    mt5_config_from_mapping(state.mt5_cfg),
+                    state.db_path,
+                    interval_seconds=interval,
+                    max_tick_age_seconds=max_age,
+                )
+                state.execution_watcher = watcher
+                watcher.start()
+            except Exception as exc:
+                print(f"Execution Watcher konnte nicht gestartet werden: {exc}")
     server = build_server(args.host, args.port, state)
     print(f"COT Journal Gateway V{VERSION} · http://{args.host}:{args.port}")
     print(f"DB: {state.db_path}")
+    if watcher is not None:
+        print(f"Live Execution Watcher aktiv · Intervall {watcher.interval_seconds:.1f}s · Tick-Maxalter {watcher.max_tick_age_seconds:.0f}s")
     print("Hinweis: Für Internetzugriff nur über einen HTTPS-Tunnel/Reverse-Proxy veröffentlichen; nicht direkt Port 8765 freigeben.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        if watcher is not None:
+            watcher.stop()
         server.server_close()
 
 

@@ -589,6 +589,26 @@ def bridge_snapshot(config: MT5Config) -> dict[str, Any]:
         else:
             specs = pd.DataFrame(columns=spec_columns)
 
+    # Overlay the fast watched-symbol quotes (2s bridge timer) on top of the
+    # slower 60s broker catalog. This keeps Prop Desk marks current without
+    # exporting the entire broker universe every timer tick.
+    try:
+        fast_quotes = read_bridge_quotes(config)
+    except Exception:
+        fast_quotes = pd.DataFrame()
+    if not fast_quotes.empty and not specs.empty and "symbol" in specs.columns:
+        specs = specs.copy()
+        spec_index = {str(v).upper(): idx for idx, v in specs["symbol"].items()}
+        for _, q in fast_quotes.iterrows():
+            idx = spec_index.get(str(q.get("symbol", "")).upper())
+            if idx is None:
+                continue
+            for col in ("bid", "ask", "last"):
+                val = q.get(col)
+                if val is not None and not pd.isna(val):
+                    specs.at[idx, col] = val
+            specs.at[idx, "quote_time_utc"] = q.get("exported_at_utc")
+
     warnings: list[str] = []
     if config.login and account.get("login") and int(config.login) != int(account["login"]):
         warnings.append("Bridge-Kontonummer weicht von der in secrets.toml konfigurierten Nummer ab.")
@@ -642,3 +662,56 @@ def get_mt5_snapshot(config: MT5Config) -> dict[str, Any]:
                 "es wurde keine lokale MT5-Bridge gefunden."
             ) from bridge_error
         raise
+
+
+QUOTE_WATCH_FILE = "cot_mt5_quote_watch.csv"
+QUOTES_FILE = "cot_mt5_quotes.csv"
+
+
+def write_bridge_quote_watch(config: MT5Config, symbols: list[str] | tuple[str, ...] | set[str]) -> Path:
+    """Publish the minimal symbol watch-list consumed by the local read-only EA."""
+    directory = discover_bridge_directory(config.bridge_common_path)
+    if directory is None:
+        raise MT5BridgeError("Keine MT5-Bridge-Dateien gefunden; Quote-Watch kann nicht geschrieben werden.")
+    clean = sorted({str(symbol or "").strip() for symbol in symbols if str(symbol or "").strip()})
+    path = directory / QUOTE_WATCH_FILE
+    tmp = directory / (QUOTE_WATCH_FILE + ".tmp")
+    payload = "symbol\n" + "".join(f"{symbol}\n" for symbol in clean)
+    tmp.write_text(payload, encoding="utf-8")
+    tmp.replace(path)
+    return path
+
+
+def read_bridge_quotes(config: MT5Config, *, max_age_seconds: int | None = None) -> pd.DataFrame:
+    """Read the fast watched-symbol quote export produced every bridge timer tick."""
+    directory = discover_bridge_directory(config.bridge_common_path)
+    if directory is None:
+        raise MT5BridgeError("Keine MT5-Bridge-Dateien gefunden; Live-Quotes sind nicht verfügbar.")
+    path = directory / QUOTES_FILE
+    if not path.exists():
+        return pd.DataFrame(columns=["symbol", "bid", "ask", "last", "exported_at_utc", "tick_age_seconds", "trade_mode", "can_open"])
+    age_limit = int(max_age_seconds or config.bridge_max_age_seconds)
+    file_age = datetime.now(timezone.utc).timestamp() - path.stat().st_mtime
+    if file_age > age_limit:
+        return pd.DataFrame(columns=["symbol", "bid", "ask", "last", "exported_at_utc", "tick_age_seconds", "trade_mode", "can_open"])
+    df = _read_bridge_csv(path)
+    if df.empty:
+        return pd.DataFrame(columns=["symbol", "bid", "ask", "last", "exported_at_utc", "tick_age_seconds", "trade_mode", "can_open"])
+    out = df.copy()
+    for col in ("bid", "ask", "last"):
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
+    if "exported_at_utc_unix" in out.columns:
+        out["exported_at_utc"] = pd.to_datetime(pd.to_numeric(out["exported_at_utc_unix"], errors="coerce"), unit="s", utc=True, errors="coerce")
+    else:
+        out["exported_at_utc"] = pd.Timestamp.fromtimestamp(path.stat().st_mtime, tz="UTC")
+    if "tick_age_seconds" in out.columns:
+        out["tick_age_seconds"] = pd.to_numeric(out["tick_age_seconds"], errors="coerce")
+    else:
+        # Older bridge versions do not provide a timezone-safe tick age. They are
+        # intentionally not eligible for live execution; history sync remains the safety net.
+        out["tick_age_seconds"] = pd.NA
+    for col in ("trade_mode", "can_open"):
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
+    return out
