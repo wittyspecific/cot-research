@@ -706,3 +706,7 @@ Die Passwörter werden nicht im Klartext gespeichert, sondern als PBKDF2-SHA256-
 ## V3.8.1.3 · Safe Trade Void
 
 Trader können eigene, noch nicht ausgelöste `PLANNED`-Trades als **Fehleintrag verwerfen**. Der Plan/Snapshot bleibt unveränderlich in SQLite, bekommt aber den abgeleiteten Lifecycle `VOID` plus append-only `PLAN_VOIDED`-Event mit Begründung. VOID-Trades werden vom MT5-Outcome-Sync, Prop Desk, Journal-Kennzahlen und dem ML-Feature-Export ausgeschlossen. ADMINs dürfen im Ausnahmefall auch fremde PLANNED-Fehleinträge verwerfen.
+
+## V3.8.1.4 · MT5 History Timezone Fix
+
+The local MT5 bridge now treats journal/history request timestamps as UTC at the Python boundary, translates them to the MetaTrader trade-server clock for MQL5 `CopyRates()`, and converts returned server-clock bar timestamps back to UTC before caching. On FTMO MT4/MT5 the bridge follows the documented GMT+2 / GMT+3 US-DST platform-time convention. The first bridge outcome sync after this upgrade resets only the local MT5 history cache so previously misaligned coverage is rebuilt cleanly.

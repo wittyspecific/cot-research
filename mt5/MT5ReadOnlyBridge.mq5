@@ -1,5 +1,5 @@
 #property strict
-#property version   "3.610"
+#property version   "3.814"
 #property description "Read-only account/position/risk/history export for COT Research."
 #property description "Contains no OrderSend, trade modification or close logic."
 
@@ -271,6 +271,83 @@ ENUM_TIMEFRAMES ParseHistoryTimeframe(string text)
    return PERIOD_CURRENT;
 }
 
+// History requests cross a timezone boundary: Python/SQLite use UTC epoch seconds,
+// while MQL5 chart/bar datetimes are expressed in the MetaTrader trade-server clock.
+// FTMO documents MT4/MT5 platform time as GMT+2 with US-DST switching to GMT+3.
+// We detect that server family from the live terminal offset and then use the
+// historical US-DST rule so backfills across March/November remain correctly aligned.
+long MeasuredServerUtcOffsetSeconds()
+{
+   datetime server_now=TimeTradeServer();
+   if(server_now<=0)
+      server_now=TimeCurrent();
+   datetime utc_now=TimeGMT();
+   if(server_now<=0 || utc_now<=0)
+      return 0;
+
+   long raw=(long)(server_now-utc_now);
+   long rounded=(long)(MathRound((double)raw/900.0)*900.0);
+   if(rounded < -14*3600 || rounded > 14*3600)
+      return 0;
+   return rounded;
+}
+
+datetime NthSundayUtc(int year, int month, int nth, int hour_utc)
+{
+   MqlDateTime dt={};
+   dt.year=year;
+   dt.mon=month;
+   dt.day=1;
+   dt.hour=hour_utc;
+   datetime first=StructToTime(dt);
+   MqlDateTime first_dt={};
+   TimeToStruct(first, first_dt);
+   int day=1 + ((7-first_dt.day_of_week)%7) + (nth-1)*7;
+   dt.day=day;
+   return StructToTime(dt);
+}
+
+bool IsUsDstUtc(long utc_unix)
+{
+   MqlDateTime dt={};
+   TimeToStruct((datetime)utc_unix, dt);
+   // US DST: second Sunday in March 07:00 UTC through first Sunday in November 06:00 UTC.
+   datetime start=NthSundayUtc(dt.year, 3, 2, 7);
+   datetime finish=NthSundayUtc(dt.year, 11, 1, 6);
+   return ((datetime)utc_unix>=start && (datetime)utc_unix<finish);
+}
+
+long HistoryServerUtcOffsetSecondsAt(long utc_unix)
+{
+   long measured=MeasuredServerUtcOffsetSeconds();
+   // FTMO MT4/MT5 uses GMT+2 outside US DST and GMT+3 during US DST.
+   if(measured==2*3600 || measured==3*3600)
+      return IsUsDstUtc(utc_unix) ? 3*3600 : 2*3600;
+   // Safe fallback for another broker/server timezone: use the measured current offset.
+   return measured;
+}
+
+datetime UtcUnixToServerDatetime(long utc_unix)
+{
+   return (datetime)(utc_unix + HistoryServerUtcOffsetSecondsAt(utc_unix));
+}
+
+long ServerDatetimeToUtcUnix(datetime server_time)
+{
+   long measured=MeasuredServerUtcOffsetSeconds();
+   if(measured==2*3600 || measured==3*3600)
+   {
+      // Resolve each returned bar independently so ranges spanning a DST switch stay UTC-correct.
+      long dst_candidate=(long)server_time-3*3600;
+      if(HistoryServerUtcOffsetSecondsAt(dst_candidate)==3*3600)
+         return dst_candidate;
+      long std_candidate=(long)server_time-2*3600;
+      if(HistoryServerUtcOffsetSecondsAt(std_candidate)==2*3600)
+         return std_candidate;
+   }
+   return (long)server_time-measured;
+}
+
 void WriteHistoryError(string request_id, string message)
 {
    string response="cot_history_response_"+request_id+".csv";
@@ -320,7 +397,9 @@ void ProcessHistoryRequest(string filename)
    MqlRates rates[];
    ArraySetAsSeries(rates, false);
    ResetLastError();
-   int copied=CopyRates(symbol, timeframe, (datetime)from_unix, (datetime)to_unix, rates);
+   datetime server_from=UtcUnixToServerDatetime(from_unix);
+   datetime server_to=UtcUnixToServerDatetime(to_unix);
+   int copied=CopyRates(symbol, timeframe, server_from, server_to, rates);
    int err=GetLastError();
 
    // CopyRates can return -1 while the terminal is still synchronizing history.
@@ -350,7 +429,7 @@ void ProcessHistoryRequest(string filename)
             request_id,
             "OK",
             "",
-            (long)rates[i].time,
+            ServerDatetimeToUtcUnix(rates[i].time),
             rates[i].open,
             rates[i].high,
             rates[i].low,

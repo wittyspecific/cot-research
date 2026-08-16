@@ -11,7 +11,7 @@ import pandas as pd
 
 from .mt5_account import MT5Config
 from .mt5_history import HistoryRequest, MT5HistoryError, history_batch
-from .mt5_history_cache import load_cached_bars, merge_missing_requests, missing_intervals, store_history_segment
+from .mt5_history_cache import ensure_history_time_basis, load_cached_bars, merge_missing_requests, missing_intervals, store_history_segment
 from .trade_journal import list_trade_plans, upsert_trade_outcome
 
 
@@ -608,6 +608,9 @@ def sync_trade_outcomes(
     their simulated fill with M15 -> M5 -> M1 and then rejoin the normal H1 path.
     """
     now_ts = _utc(now or datetime.now(timezone.utc))
+    cache_time_basis_reset = False
+    if db_path is not None and str(config.mode or "").lower() == "bridge":
+        cache_time_basis_reset = ensure_history_time_basis(db_path=db_path)
     plans = list_trade_plans(
         db_path=db_path, limit=max_trades, trader_id=trader_id,
         lifecycle_statuses=("PLANNED", "ACTIVE"),
@@ -617,6 +620,7 @@ def sync_trade_outcomes(
             "checked": 0, "updated": 0, "ambiguous": 0, "errors": [],
             "symbols_checked": 0, "remote_requests": 0, "cache_only_requests": 0,
             "bars_loaded": 0, "bars_loaded_by_timeframe": {},
+            "cache_time_basis_reset": cache_time_basis_reset,
             "remote_requests_by_timeframe": {},
         }
 
@@ -801,6 +805,7 @@ def sync_trade_outcomes(
         "cache_only_requests": int(cache_stats["cache_only_requests"]),
         "bars_loaded": int(cache_stats["bars_loaded"]),
         "bars_loaded_by_timeframe": dict(cache_stats["bars_loaded_by_timeframe"]),
+        "cache_time_basis_reset": cache_time_basis_reset,
         "remote_requests_by_timeframe": dict(cache_stats["remote_requests_by_timeframe"]),
         "remote_symbols": sorted(cache_stats["remote_symbols"]),
     }

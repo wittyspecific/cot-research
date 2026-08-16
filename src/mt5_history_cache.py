@@ -13,6 +13,35 @@ CACHE_TIMEFRAMES = {"M1", "M5", "M15", "H1", "D1"}
 BAR_COLUMNS = ["time", "open", "high", "low", "close", "tick_volume", "spread", "real_volume"]
 
 
+HISTORY_TIME_BASIS_KEY = "mt5_history_time_basis"
+HISTORY_TIME_BASIS_VERSION = "bridge_server_time_to_utc_v2"
+
+
+def ensure_history_time_basis(*, db_path: str | Path | None = None) -> bool:
+    """One-time invalidation for the V3.8.1.4 bridge UTC/server-time correction.
+
+    Older bridge responses stored MetaTrader server-clock bar timestamps as if they
+    were UTC. Both bars and coverage therefore need one clean rebuild. This deletes
+    cache tables only; immutable trade plans/snapshots/events are untouched.
+    Returns True when a reset was performed.
+    """
+    path = initialize_journal(db_path)
+    with journal_connection(path) as con:
+        row = con.execute(
+            "SELECT value FROM schema_meta WHERE key=?",
+            (HISTORY_TIME_BASIS_KEY,),
+        ).fetchone()
+        if row is not None and str(row["value"]) == HISTORY_TIME_BASIS_VERSION:
+            return False
+        con.execute("DELETE FROM mt5_history_bars")
+        con.execute("DELETE FROM mt5_history_coverage")
+        con.execute(
+            "INSERT OR REPLACE INTO schema_meta(key, value) VALUES(?, ?)",
+            (HISTORY_TIME_BASIS_KEY, HISTORY_TIME_BASIS_VERSION),
+        )
+    return True
+
+
 def _utc(value: Any) -> pd.Timestamp:
     ts = pd.Timestamp(value)
     if ts.tzinfo is None:
