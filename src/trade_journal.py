@@ -269,6 +269,8 @@ CREATE TABLE IF NOT EXISTS trade_outcomes (
     plus_3r_time_utc TEXT,
     entry_triggered INTEGER,
     entry_time_utc TEXT,
+    execution_price REAL,
+    fill_timeframe TEXT,
     stop_time_utc TEXT,
     target_time_utc TEXT,
     first_exit TEXT,
@@ -385,6 +387,8 @@ def initialize_journal(db_path: str | Path | None = None) -> Path:
             ("plus_1r_time_utc", "TEXT"),
             ("plus_2r_time_utc", "TEXT"),
             ("plus_3r_time_utc", "TEXT"),
+            ("execution_price", "REAL"),
+            ("fill_timeframe", "TEXT"),
         ]:
             _ensure_column(con, "trade_outcomes", name, ddl)
         con.execute(
@@ -637,7 +641,7 @@ def upsert_trade_outcome(
     fields = [
         "lifecycle_status", "exit_time_utc", "last_bar_time_utc", "ambiguity_reason", "data_timeframe",
         "plus_1r_time_utc", "plus_2r_time_utc", "plus_3r_time_utc",
-        "entry_triggered", "entry_time_utc", "stop_time_utc", "target_time_utc", "first_exit",
+        "entry_triggered", "entry_time_utc", "execution_price", "fill_timeframe", "stop_time_utc", "target_time_utc", "first_exit",
         "result_r", "mae_r", "mfe_r", "holding_minutes", "forward_1d", "forward_3d",
         "forward_5d", "forward_10d", "forward_20d", "forward_40d", "forward_60d",
     ]
@@ -685,7 +689,7 @@ def list_trade_plans(
     params.append(int(limit))
     query = f"""
         SELECT p.*, t.username AS trader_username, t.display_name AS trader_display_name, t.role AS trader_role,
-               o.lifecycle_status, o.entry_triggered, o.entry_time_utc, o.exit_time_utc,
+               o.lifecycle_status, o.entry_triggered, o.entry_time_utc, o.execution_price, o.fill_timeframe, o.exit_time_utc,
                o.first_exit, o.result_r, o.mae_r, o.mfe_r, o.last_evaluated_at_utc
         FROM trade_plans p
         LEFT JOIN traders t ON t.trader_id=p.trader_id

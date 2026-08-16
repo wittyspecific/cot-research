@@ -20,7 +20,7 @@ COT Journal Gateway
     +--> nur Symbol-Metadaten aus der lokalen MT5-Bridge
 
 Separat auf dem Mac:
-LOCAL Streamlit -> manueller Outcome Sync -> MT5 Bridge -> H1/M5/M1 -> SQLite
+LOCAL Streamlit -> manueller Outcome Sync -> MT5 Bridge -> MARKET Fill M15/M5/M1 -> H1/M5/M1 -> SQLite
 ```
 
 Die Online-App besitzt keine zweite Journal-Datenbank. Wenn ein Trader auf **Speichern** klickt, bestätigt das Gateway den Plan erst, nachdem er in der lokalen Master-SQLite geschrieben wurde. Ist dein Mac/Gateway nicht erreichbar, wird der Plan nicht stillschweigend irgendwo anders gespeichert; der Trader erhält einen Fehler und muss später erneut speichern.
@@ -155,5 +155,5 @@ Keine MT5-Passwörter, keine lokale `db_path` und keine Mac-Dateipfade in die Cl
 4. Beim Speichern schreibt das Gateway den Plan + Snapshot direkt in die lokale SQLite.
 5. Online Journal liest denselben lokalen Master-Stand über das Gateway.
 6. Mittwoch/Freitag öffnet der ADMIN lokal das Journal und startet den Outcome Sync.
-7. Nur PLANNED/ACTIVE-Symbole werden via lokalem History-Cache/H1→M5→M1 geprüft.
+7. Nur PLANNED/ACTIVE-Symbole werden geprüft. LIMIT läuft H1→M5→M1; MARKET löst zuerst den Fill M15→M5→M1 und wechselt danach in denselben H1-Pfad.
 8. Ergebnisse landen in derselben SQLite und sind beim nächsten Online-Journal-Aufruf sichtbar.

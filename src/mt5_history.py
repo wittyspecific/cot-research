@@ -20,7 +20,7 @@ from .mt5_account import (
 )
 
 
-SUPPORTED_TIMEFRAMES = {"M1", "M5", "H1", "D1"}
+SUPPORTED_TIMEFRAMES = {"M1", "M5", "M15", "H1", "D1"}
 BAR_COLUMNS = ["time", "open", "high", "low", "close", "tick_volume", "spread", "real_volume"]
 
 
@@ -183,6 +183,7 @@ def _direct_timeframe(mt5: Any, timeframe: str) -> Any:
     return {
         "M1": mt5.TIMEFRAME_M1,
         "M5": mt5.TIMEFRAME_M5,
+        "M15": mt5.TIMEFRAME_M15,
         "H1": mt5.TIMEFRAME_H1,
         "D1": mt5.TIMEFRAME_D1,
     }[timeframe]

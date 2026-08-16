@@ -55,7 +55,7 @@ Bewusst getrennt und veränderbar, weil Outcomes erst nach dem Plan entstehen. V
 - zusätzliches Outcome-JSON
 
 ### Historienprinzip
-Der Outcome Tracker fragt die lokale read-only MT5-Bridge nach historischen CFD-Bars. Primär wird H1 verwendet. Falls eine H1-Kerze Entry/Exit, SL/TP, den Plan-Start oder das Limit-Expiry nicht chronologisch eindeutig auflösen kann, wird der Pfad mit M5 erneut geprüft. Nur wenn M5 weiterhin uneindeutig ist, folgt M1. Bleibt auch M1 unklar, wird `AMBIGUOUS` gespeichert und kein Ergebnis erfunden. Der Bot muss nicht 24/7 laufen; beim nächsten Journal-Start wird die fehlende Historie rückwirkend nachgeladen.
+Der Outcome Tracker fragt die lokale read-only MT5-Bridge nach historischen CFD-Bars. LIMIT-Pläne verwenden primär H1; unklare Intrabar-Fälle werden mit M5 und danach M1 aufgelöst. MARKET-Pläne lösen zuerst den tatsächlichen simulierten Fill über M15 auf; liegt der Speichermoment innerhalb der M15-Bar, wird nur für den Fill M5 und nötigenfalls M1 verwendet. Bei geschlossenem Markt gilt der Open der ersten verfügbaren Bar nach dem Planzeitpunkt als Fill. Danach läuft auch MARKET wieder über H1 → M5 → M1. Bleibt selbst M1 unklar, wird `AMBIGUOUS` gespeichert und kein Ergebnis erfunden. Der Bot muss nicht 24/7 laufen; beim nächsten manuellen Sync wird die fehlende Historie rückwirkend nachgeladen.
 
 ## ML-Grundsatz
 Labels/Outcomes dürfen niemals in die eingefrorenen Snapshot-Features zurückgeschrieben werden. Training muss zeitlich getrennt und später Walk-Forward/Out-of-Sample erfolgen.
@@ -72,7 +72,7 @@ Lokaler persistenter History-Cache für den Outcome Tracker.
 
 `mt5_history_bars` speichert deduplizierte OHLC-Bars pro `symbol + timeframe + time_utc`. `mt5_history_coverage` speichert zusätzlich bereits geprüfte halb-offene Zeiträume `[start, end)`, auch wenn MT5 darin keine Bars geliefert hat (z. B. Wochenende/Marktschließung). Dadurch werden gleiche Zeiträume nicht bei jedem Sync erneut beim MT5-Terminal angefragt.
 
-Der reguläre Swing-Sync berücksichtigt nur `PLANNED` und `ACTIVE`. Mehrere Trades desselben Symbols teilen sich denselben Cache. H1 ist Standard; M5 und M1 werden nur bei Ambiguität nachgeladen. Laufende Kerzen gelten nicht als finale Cache-Coverage.
+Der reguläre Swing-Sync berücksichtigt nur `PLANNED` und `ACTIVE`. Mehrere Trades desselben Symbols teilen sich denselben Cache. LIMIT nutzt H1 als Standard. MARKET nutzt M15 nur zur Fill-Auflösung und danach ebenfalls H1; M5/M1 bleiben gezielte Auflösungs-Layer. Laufende Kerzen gelten nicht als finale Cache-Coverage.
 
 ## V3.8.0 · Prop Desk Tabellen
 

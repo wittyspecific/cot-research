@@ -1,3 +1,7 @@
+## V3.8.1.2 · MARKET Fill Resolution
+
+MARKET-Simulationen werden nicht mehr pauschal am eingegebenen Plan-Preis aktiviert. Der Outcome Tracker löst den simulierten Fill zuerst mit abgeschlossenen **M15-Bars** auf; liegt der Plan mitten in der M15-Bar, folgt nur für den Fill **M5 → M1**. Bei einem geschlossenen Markt wird der **Open der ersten tatsächlich vorhandenen Bar nach dem Planzeitpunkt** als simulierter Fill verwendet. Danach läuft das normale Swing-Tracking wieder auf **H1 → M5 → M1**. `execution_price` und `fill_timeframe` werden getrennt vom unveränderlichen Plan gespeichert und der Prop Desk verwendet den aufgelösten Fill für Floating/Realized P&L sowie den tatsächlichen Stop-Risk. Die MT5-Bridge unterstützt dafür neu `M15`.
+
 ## V3.8.1.1 · Currency 20/40/60T Seasonality
 
 Die Forex-Währungsübersicht zeigt jetzt je Einzelwährung eine kompakte 20J-Saisonalität über 20/40/60 Handelstage (`20▲ · 40▼ · 60—`). Die Berechnung nutzt dieselbe Richtungslogik wie die Watchlist und die dort hinterlegten Währungs-Preisproxies. Die Saison bleibt separater Kontext und verändert den COT-Score 1/4–4/4 nicht.

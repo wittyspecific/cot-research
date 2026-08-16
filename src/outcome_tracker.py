@@ -15,15 +15,17 @@ from .mt5_history_cache import load_cached_bars, merge_missing_requests, missing
 from .trade_journal import list_trade_plans, upsert_trade_outcome
 
 
-TRACKER_VERSION = "1.2"
+TRACKER_VERSION = "1.3"
 PRIMARY_TIMEFRAME = "H1"
+MARKET_FILL_TIMEFRAMES = ("M15", "M5", "M1")
 RESOLUTION_TIMEFRAMES = ("M5", "M1")
 FORWARD_DAYS = (1, 3, 5, 10, 20, 40, 60)
 
-_TIMEFRAME_FREQ = {"M1": "min", "M5": "5min", "H1": "h", "D1": "D"}
+_TIMEFRAME_FREQ = {"M1": "min", "M5": "5min", "M15": "15min", "H1": "h", "D1": "D"}
 _TIMEFRAME_DELTA = {
     "M1": pd.Timedelta(minutes=1),
     "M5": pd.Timedelta(minutes=5),
+    "M15": pd.Timedelta(minutes=15),
     "H1": pd.Timedelta(hours=1),
     "D1": pd.Timedelta(days=1),
 }
@@ -109,6 +111,119 @@ def _bar_r_extremes(side: str, row: pd.Series, entry: float, risk: float) -> tup
     return favorable, adverse
 
 
+def resolve_market_fill(
+    plan: Mapping[str, Any],
+    bars: pd.DataFrame,
+    *,
+    timeframe: str = "M15",
+    now: Any | None = None,
+) -> dict[str, Any]:
+    """Resolve a simulated MARKET fill from completed MT5 bars.
+
+    M15 is the normal fill layer. If the plan timestamp lies inside that bar, the
+    result is AMBIGUOUS so the caller can refine to M5 and then M1. At M1 we use
+    the first *full* minute beginning after the save timestamp when the save happened
+    mid-minute. For a closed-market gap, the first future bar open is the fill.
+    """
+    tf = str(timeframe or "M15").upper()
+    if tf not in MARKET_FILL_TIMEFRAMES:
+        raise ValueError(f"Nicht unterstützter MARKET-Fill-Timeframe: {tf}")
+    if str(plan.get("order_type", "LIMIT") or "LIMIT").upper() != "MARKET":
+        raise ValueError("resolve_market_fill ist nur für MARKET-Pläne gedacht.")
+
+    created = _utc(plan["created_at_utc"])
+    now_ts = _utc(now or datetime.now(timezone.utc))
+    data = _prepare_bars(bars, created, tf)
+    base = {
+        "tracker_version": TRACKER_VERSION,
+        "lifecycle_status": "PLANNED",
+        "entry_triggered": 0,
+        "entry_time_utc": None,
+        "execution_price": None,
+        "fill_timeframe": None,
+        "stop_time_utc": None,
+        "target_time_utc": None,
+        "exit_time_utc": None,
+        "first_exit": None,
+        "result_r": None,
+        "mae_r": None,
+        "mfe_r": None,
+        "holding_minutes": None,
+        "ambiguity_reason": None,
+        "ambiguous_bar_time_utc": None,
+        "data_timeframe": tf,
+        "last_bar_time_utc": _iso(data.iloc[-1]["time"]) if not data.empty else None,
+        "plus_1r_time_utc": None,
+        "plus_2r_time_utc": None,
+        "plus_3r_time_utc": None,
+    }
+    if data.empty:
+        return base
+
+    first = data.iloc[0]
+    first_time = _utc(first["time"])
+    if first_time < created:
+        if tf != "M1":
+            base.update({
+                "lifecycle_status": "AMBIGUOUS",
+                "ambiguity_reason": f"MARKET_FILL_IN_PARTIAL_{tf}_BAR",
+                "ambiguous_bar_time_utc": _iso(first_time),
+            })
+            return base
+        # A plan saved at e.g. 23:17:42 cannot safely use the 23:17 M1 open.
+        # Use the next complete minute open instead; maximum timing error < 60 sec.
+        next_full = created.ceil("min")
+        candidates = data[data["time"] >= next_full]
+        if candidates.empty:
+            return base
+        first = candidates.iloc[0]
+        first_time = _utc(first["time"])
+
+    execution = float(first["open"])
+    stop = float(plan["stop"])
+    target = _finite(plan.get("target"))
+    side = str(plan.get("side", "")).upper()
+    if (side == "LONG" and execution <= stop) or (side == "SHORT" and execution >= stop):
+        base.update({
+            "lifecycle_status": "AMBIGUOUS",
+            "ambiguity_reason": "MARKET_FILL_INVALIDATES_STOP",
+            "ambiguous_bar_time_utc": _iso(first_time),
+            "execution_price": execution,
+            "fill_timeframe": tf,
+        })
+        return base
+    if target is not None and ((side == "LONG" and execution >= target) or (side == "SHORT" and execution <= target)):
+        base.update({
+            "lifecycle_status": "AMBIGUOUS",
+            "ambiguity_reason": "MARKET_FILL_BEYOND_TARGET",
+            "ambiguous_bar_time_utc": _iso(first_time),
+            "execution_price": execution,
+            "fill_timeframe": tf,
+        })
+        return base
+
+    base.update({
+        "lifecycle_status": "ACTIVE",
+        "entry_triggered": 1,
+        "entry_time_utc": _iso(first_time),
+        "execution_price": execution,
+        "fill_timeframe": tf,
+        "mae_r": 0.0,
+        "mfe_r": 0.0,
+        "holding_minutes": max(0.0, (now_ts - first_time).total_seconds() / 60.0),
+    })
+    return base
+
+
+def _effective_market_plan(plan: Mapping[str, Any], fill: Mapping[str, Any]) -> dict[str, Any]:
+    effective = dict(plan)
+    effective["entry"] = float(fill["execution_price"])
+    effective["created_at_utc"] = str(fill["entry_time_utc"])
+    effective["_resolved_market_fill"] = True
+    effective["_market_fill_timeframe"] = str(fill.get("fill_timeframe") or "")
+    return effective
+
+
 def evaluate_trade_path(plan: Mapping[str, Any], bars: pd.DataFrame, *, timeframe: str = PRIMARY_TIMEFRAME, now: Any | None = None) -> dict[str, Any]:
     """Chronologically evaluate one immutable plan against OHLC bars.
 
@@ -134,6 +249,8 @@ def evaluate_trade_path(plan: Mapping[str, Any], bars: pd.DataFrame, *, timefram
         "lifecycle_status": "PLANNED",
         "entry_triggered": 0,
         "entry_time_utc": None,
+        "execution_price": None,
+        "fill_timeframe": None,
         "stop_time_utc": None,
         "target_time_utc": None,
         "exit_time_utc": None,
@@ -162,26 +279,46 @@ def evaluate_trade_path(plan: Mapping[str, Any], bars: pd.DataFrame, *, timefram
     if order_type == "MARKET":
         entry_idx = 0
         entry_time = created
-        if first_partial and timeframe != "M1":
-            base.update({
-                "lifecycle_status": "AMBIGUOUS",
-                "ambiguity_reason": "MARKET_ENTRY_IN_PARTIAL_START_BAR",
-                "ambiguous_bar_time_utc": _iso(data.iloc[0]["time"]),
-                "entry_triggered": 1,
-                "entry_time_utc": _iso(created),
-            })
-            return base
-        if first_partial and timeframe == "M1":
-            first = data.iloc[0]
-            if _touches_stop(side, first, stop) or _touches_target(side, first, target):
+        resolved_fill = bool(plan.get("_resolved_market_fill", False))
+        if resolved_fill:
+            base["execution_price"] = entry
+            base["fill_timeframe"] = str(plan.get("_market_fill_timeframe") or "") or None
+            # The coarse bar containing an already-resolved fill may contain price
+            # action from before the fill. Only refine if an exit level is also
+            # touched inside that partial bar; otherwise skip its extrema later.
+            if first_partial:
+                first = data.iloc[0]
+                if _touches_stop(side, first, stop) or _touches_target(side, first, target):
+                    base.update({
+                        "lifecycle_status": "AMBIGUOUS",
+                        "ambiguity_reason": "MARKET_EXIT_IN_PARTIAL_START_BAR",
+                        "ambiguous_bar_time_utc": _iso(first["time"]),
+                        "entry_triggered": 1,
+                        "entry_time_utc": _iso(created),
+                    })
+                    return base
+        else:
+            if first_partial and timeframe != "M1":
                 base.update({
                     "lifecycle_status": "AMBIGUOUS",
-                    "ambiguity_reason": "MARKET_EXIT_IN_PARTIAL_M1_BAR",
-                    "ambiguous_bar_time_utc": _iso(first["time"]),
+                    "ambiguity_reason": "MARKET_ENTRY_IN_PARTIAL_START_BAR",
+                    "ambiguous_bar_time_utc": _iso(data.iloc[0]["time"]),
                     "entry_triggered": 1,
                     "entry_time_utc": _iso(created),
                 })
                 return base
+            if first_partial and timeframe == "M1":
+                first = data.iloc[0]
+                if _touches_stop(side, first, stop) or _touches_target(side, first, target):
+                    base.update({
+                        "lifecycle_status": "AMBIGUOUS",
+                        "ambiguity_reason": "MARKET_EXIT_IN_PARTIAL_M1_BAR",
+                        "ambiguous_bar_time_utc": _iso(first["time"]),
+                        "entry_triggered": 1,
+                        "entry_time_utc": _iso(created),
+                    })
+                    return base
+            base["execution_price"] = entry
     else:
         entry_idx = None
         entry_time = None
@@ -213,6 +350,8 @@ def evaluate_trade_path(plan: Mapping[str, Any], bars: pd.DataFrame, *, timefram
 
             entry_idx = int(idx)
             entry_time = bar_time
+            base["execution_price"] = entry
+            base["fill_timeframe"] = timeframe
             # OHLC cannot prove that an exit touched in the same bar happened after the limit entry.
             if _touches_stop(side, row, stop) or _touches_target(side, row, target):
                 base.update({
@@ -463,7 +602,11 @@ def sync_trade_outcomes(
     now: Any | None = None,
     trader_id: str | None = None,
 ) -> dict[str, Any]:
-    """Catch up journal outcomes from MT5 history. No order/trade operation is used."""
+    """Catch up journal outcomes from MT5 history. No order/trade operation is used.
+
+    LIMIT plans use H1 as the primary Swing timeframe. MARKET plans first resolve
+    their simulated fill with M15 -> M5 -> M1 and then rejoin the normal H1 path.
+    """
     now_ts = _utc(now or datetime.now(timezone.utc))
     plans = list_trade_plans(
         db_path=db_path, limit=max_trades, trader_id=trader_id,
@@ -477,68 +620,138 @@ def sync_trade_outcomes(
             "remote_requests_by_timeframe": {},
         }
 
-    requests: list[HistoryRequest] = []
-    request_to_trade: dict[str, str] = {}
+    cache_stats = _blank_cache_stats()
     plan_by_trade: dict[str, dict[str, Any]] = {}
-    no_completed_bar_trades: list[str] = []
-    completed_h1_end = _completed_boundary(now_ts, PRIMARY_TIMEFRAME)
+    effective_plan_by_trade: dict[str, dict[str, Any]] = {}
+    outcomes: dict[str, dict[str, Any]] = {}
+    market_pending: set[str] = set()
+
     for _, row in plans.iterrows():
         plan = row.to_dict()
         trade_id = str(plan["trade_id"])
         plan_by_trade[trade_id] = plan
+        order_type = str(plan.get("order_type", "LIMIT") or "LIMIT").upper()
+        execution = _finite(plan.get("execution_price"))
+        entry_time = plan.get("entry_time_utc")
+        triggered_raw = plan.get("entry_triggered")
+        triggered = False if triggered_raw is None or pd.isna(triggered_raw) else bool(triggered_raw)
+        if order_type == "MARKET" and triggered and execution is not None and entry_time not in (None, "") and not pd.isna(entry_time):
+            fill = {
+                "execution_price": execution,
+                "entry_time_utc": str(entry_time),
+                "fill_timeframe": str(plan.get("fill_timeframe") or "M15"),
+            }
+            effective_plan_by_trade[trade_id] = _effective_market_plan(plan, fill)
+        elif order_type == "MARKET":
+            market_pending.add(trade_id)
+        else:
+            effective_plan_by_trade[trade_id] = plan
+
+    # MARKET fills: M15 normally, M5/M1 only when the save timestamp lies inside
+    # the coarser bar. Closed-market plans naturally wait for the first future bar.
+    for fill_tf in MARKET_FILL_TIMEFRAMES:
+        unresolved = sorted(market_pending)
+        if not unresolved:
+            break
+        fill_requests: list[HistoryRequest] = []
+        request_to_trade: dict[str, str] = {}
+        no_completed: set[str] = set()
+        completed_end = _completed_boundary(now_ts, fill_tf)
+        for trade_id in unresolved:
+            plan = plan_by_trade[trade_id]
+            start = _utc(plan["created_at_utc"]).floor(_timeframe_freq(fill_tf))
+            end = completed_end
+            if end <= start:
+                no_completed.add(trade_id)
+                continue
+            rid = f"fill_{fill_tf.lower()}_{trade_id.replace('-', '')[:16]}"
+            fill_requests.append(HistoryRequest(str(plan["cfd_symbol"]), start, end, fill_tf, rid))
+            request_to_trade[rid] = trade_id
+
+        fetched, stats = _cached_history_batch(
+            config, fill_requests, db_path=db_path, timeout_seconds=timeout_seconds
+        )
+        _merge_cache_stats(cache_stats, stats)
+
+        next_pending: set[str] = set()
+        for trade_id in unresolved:
+            if trade_id in no_completed:
+                outcomes[trade_id] = resolve_market_fill(
+                    plan_by_trade[trade_id], pd.DataFrame(), timeframe=fill_tf, now=now_ts
+                )
+                # Wait for the first completed M15 bar rather than immediately
+                # falling down to smaller timeframes during the still-forming bar.
+                continue
+            rid = next((key for key, value in request_to_trade.items() if value == trade_id), None)
+            fill = resolve_market_fill(
+                plan_by_trade[trade_id], fetched.get(rid, pd.DataFrame()) if rid else pd.DataFrame(),
+                timeframe=fill_tf, now=now_ts,
+            )
+            outcomes[trade_id] = fill
+            if fill.get("lifecycle_status") == "ACTIVE":
+                effective_plan_by_trade[trade_id] = _effective_market_plan(plan_by_trade[trade_id], fill)
+            elif fill.get("lifecycle_status") == "AMBIGUOUS" and fill_tf != "M1" and str(fill.get("ambiguity_reason", "")).startswith("MARKET_FILL_IN_PARTIAL_"):
+                next_pending.add(trade_id)
+        market_pending = next_pending
+
+    # H1 is the normal path for LIMIT plans and for MARKET plans after their fill
+    # has been resolved. If no full H1 exists yet after a MARKET fill, keep ACTIVE.
+    requests: list[HistoryRequest] = []
+    request_to_trade: dict[str, str] = {}
+    no_completed_h1: set[str] = set()
+    completed_h1_end = _completed_boundary(now_ts, PRIMARY_TIMEFRAME)
+    for trade_id, plan in effective_plan_by_trade.items():
         start, end = _history_window(plan, now_ts, PRIMARY_TIMEFRAME)
         end = min(end, completed_h1_end)
         if end <= start:
-            no_completed_bar_trades.append(trade_id)
+            no_completed_h1.add(trade_id)
             continue
         request_id = f"h1_{trade_id.replace('-', '')[:20]}"
         requests.append(HistoryRequest(str(plan["cfd_symbol"]), start, end, PRIMARY_TIMEFRAME, request_id))
         request_to_trade[request_id] = trade_id
 
-    cache_stats = _blank_cache_stats()
     primary, primary_stats = _cached_history_batch(
         config, requests, db_path=db_path, timeout_seconds=timeout_seconds
     )
     _merge_cache_stats(cache_stats, primary_stats)
-    outcomes: dict[str, dict[str, Any]] = {}
-    for trade_id in no_completed_bar_trades:
-        outcomes[trade_id] = evaluate_trade_path(
-            plan_by_trade[trade_id], pd.DataFrame(), timeframe=PRIMARY_TIMEFRAME, now=now_ts
-        )
+
+    for trade_id in no_completed_h1:
+        plan = effective_plan_by_trade[trade_id]
+        if str(plan.get("order_type", "LIMIT")).upper() == "MARKET" and trade_id in outcomes and outcomes[trade_id].get("entry_triggered"):
+            continue
+        outcomes[trade_id] = evaluate_trade_path(plan, pd.DataFrame(), timeframe=PRIMARY_TIMEFRAME, now=now_ts)
     for request_id, trade_id in request_to_trade.items():
-        plan = plan_by_trade[trade_id]
+        plan = effective_plan_by_trade[trade_id]
         outcomes[trade_id] = evaluate_trade_path(
             plan, primary.get(request_id, pd.DataFrame()), timeframe=PRIMARY_TIMEFRAME, now=now_ts
         )
 
-    # Only ambiguous paths are requested again. H1 is the normal Swing timeframe;
-    # M5 and then M1 are technical resolution layers, never the default data feed.
+    # H1 ambiguities are resolved with M5 and then M1. MARKET fill resolution is
+    # already complete at this point; these layers resolve only post-fill exits.
     for resolution_tf in RESOLUTION_TIMEFRAMES:
         unresolved = [
             trade_id for trade_id, outcome in outcomes.items()
-            if outcome.get("lifecycle_status") == "AMBIGUOUS"
+            if outcome.get("lifecycle_status") == "AMBIGUOUS" and trade_id in effective_plan_by_trade
         ]
         if not unresolved:
             break
         resolution_requests: list[HistoryRequest] = []
         resolution_to_trade: dict[str, str] = {}
         for trade_id in unresolved:
-            plan = plan_by_trade[trade_id]
+            plan = effective_plan_by_trade[trade_id]
             start, end = _history_window(plan, now_ts, resolution_tf, force_full=True)
             end = min(end, _completed_boundary(now_ts, resolution_tf))
             if end <= start:
                 continue
             rid = f"{resolution_tf.lower()}_{trade_id.replace('-', '')[:20]}"
-            resolution_requests.append(
-                HistoryRequest(str(plan["cfd_symbol"]), start, end, resolution_tf, rid)
-            )
+            resolution_requests.append(HistoryRequest(str(plan["cfd_symbol"]), start, end, resolution_tf, rid))
             resolution_to_trade[rid] = trade_id
         resolved, resolution_stats = _cached_history_batch(
             config, resolution_requests, db_path=db_path, timeout_seconds=timeout_seconds
         )
         _merge_cache_stats(cache_stats, resolution_stats)
         for request_id, trade_id in resolution_to_trade.items():
-            plan = plan_by_trade[trade_id]
+            plan = effective_plan_by_trade[trade_id]
             outcomes[trade_id] = evaluate_trade_path(
                 plan, resolved.get(request_id, pd.DataFrame()), timeframe=resolution_tf, now=now_ts
             )
@@ -553,7 +766,8 @@ def sync_trade_outcomes(
         if end <= start:
             continue
         rid = f"d1_{trade_id.replace('-', '')[:20]}"
-        daily_requests.append(HistoryRequest(str(plan_by_trade[trade_id]["cfd_symbol"]), start, end, "D1", rid))
+        symbol = str(plan_by_trade[trade_id]["cfd_symbol"])
+        daily_requests.append(HistoryRequest(symbol, start, end, "D1", rid))
         daily_to_trade[rid] = trade_id
     if daily_requests:
         daily, daily_stats = _cached_history_batch(
@@ -561,7 +775,10 @@ def sync_trade_outcomes(
         )
         _merge_cache_stats(cache_stats, daily_stats)
         for request_id, trade_id in daily_to_trade.items():
-            outcomes[trade_id] = add_forward_returns(outcomes[trade_id], plan_by_trade[trade_id], daily.get(request_id, pd.DataFrame()))
+            eval_plan = effective_plan_by_trade.get(trade_id, plan_by_trade[trade_id])
+            outcomes[trade_id] = add_forward_returns(
+                outcomes[trade_id], eval_plan, daily.get(request_id, pd.DataFrame())
+            )
 
     updated = 0
     ambiguous = 0

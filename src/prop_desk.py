@@ -165,7 +165,7 @@ def _closed_rows(trader_id: str, *, db_path: str | Path) -> pd.DataFrame:
                p.created_at_utc, a.balance_at_plan, a.requested_risk_pct,
                a.risk_budget, a.lots, a.actual_risk, a.risk_per_lot, a.tick_size, a.tick_value, a.sizing_status,
                o.lifecycle_status, o.exit_time_utc, o.result_r, o.first_exit,
-               o.entry_time_utc
+               o.entry_time_utc, o.execution_price, o.fill_timeframe
         FROM prop_trade_allocations a
         JOIN trade_plans p ON p.trade_id=a.trade_id
         LEFT JOIN trade_outcomes o ON o.trade_id=p.trade_id
@@ -185,14 +185,14 @@ def realized_balance(
     if df.empty:
         return float(account["starting_capital"])
     result = pd.to_numeric(df.get("result_r"), errors="coerce")
-    actual_risk = pd.to_numeric(df.get("actual_risk"), errors="coerce")
+    effective_risk = df.apply(_effective_risk_usd, axis=1)
     closed = df.get("lifecycle_status", pd.Series(index=df.index, dtype=object)).fillna("").astype(str).str.upper().eq("CLOSED")
     if as_of_utc:
         exits = pd.to_datetime(df.get("exit_time_utc"), errors="coerce", utc=True)
         cutoff = pd.to_datetime(as_of_utc, errors="coerce", utc=True)
         if pd.notna(cutoff):
             closed = closed & exits.notna() & exits.le(cutoff)
-    pnl = (result * actual_risk).where(closed, 0.0).fillna(0.0)
+    pnl = (result * effective_risk).where(closed, 0.0).fillna(0.0)
     return float(account["starting_capital"] + pnl.sum())
 
 
@@ -373,13 +373,32 @@ def _liquidation_mark(spec: Mapping[str, Any], side: str) -> float:
     return np.nan
 
 
+def _effective_entry(row: Mapping[str, Any]) -> float:
+    execution = _finite(row.get("execution_price"))
+    if np.isfinite(execution):
+        return execution
+    return _finite(row.get("entry"))
+
+
+def _effective_risk_usd(row: Mapping[str, Any]) -> float:
+    """Actual stop risk using the resolved MARKET fill when available."""
+    entry = _effective_entry(row)
+    stop = _finite(row.get("stop"))
+    lots = _finite(row.get("lots"))
+    tick_size = _finite(row.get("tick_size"))
+    tick_value = _finite(row.get("tick_value"))
+    if all(np.isfinite(v) for v in (entry, stop, lots, tick_size, tick_value)) and lots > 0 and tick_size > 0 and tick_value > 0:
+        return float((abs(entry - stop) / tick_size) * tick_value * lots)
+    return _finite(row.get("actual_risk"), 0.0)
+
+
 def _floating_pnl(row: Mapping[str, Any], mark: float) -> float:
     if not np.isfinite(mark):
         return np.nan
     lots = _finite(row.get("lots"))
     tick_size = _finite(row.get("tick_size"))
     tick_value = _finite(row.get("tick_value"))
-    entry = _finite(row.get("entry"))
+    entry = _effective_entry(row)
     if not all(np.isfinite(v) for v in (lots, tick_size, tick_value, entry)) or lots <= 0 or tick_size <= 0 or tick_value <= 0:
         return np.nan
     signed_move = (mark - entry) if str(row.get("side", "")).upper() == "LONG" else (entry - mark)
@@ -413,8 +432,8 @@ def prop_desk_state(
 
     status = df.get("lifecycle_status", pd.Series(index=df.index, dtype=object)).fillna("PLANNED").astype(str).str.upper()
     result_r = pd.to_numeric(df.get("result_r"), errors="coerce")
-    actual_risk = pd.to_numeric(df.get("actual_risk"), errors="coerce")
-    realized_each = (result_r * actual_risk).where(status.eq("CLOSED"), 0.0).fillna(0.0)
+    effective_risk = df.apply(_effective_risk_usd, axis=1)
+    realized_each = (result_r * effective_risk).where(status.eq("CLOSED"), 0.0).fillna(0.0)
     realized_pnl = float(realized_each.sum())
     balance = float(account["starting_capital"] + realized_pnl)
 
@@ -429,11 +448,11 @@ def prop_desk_state(
         pnl = _floating_pnl(data, mark)
         if np.isfinite(pnl):
             floating_values.append(float(pnl))
-        risk = _finite(data.get("actual_risk"), 0.0)
+        risk = _effective_risk_usd(data)
         current_r = float(pnl / risk) if np.isfinite(pnl) and risk > 0 else np.nan
         open_rows.append({
             "trade_id": data.get("trade_id"), "symbol": data.get("cfd_symbol"), "side": data.get("side"),
-            "entry": _finite(data.get("entry")), "stop": _finite(data.get("stop")), "target": _finite(data.get("target")),
+            "entry": _effective_entry(data), "planned_entry": _finite(data.get("entry")), "stop": _finite(data.get("stop")), "target": _finite(data.get("target")),
             "lots": _finite(data.get("lots")), "risk_usd": risk, "risk_pct_at_plan": _finite(data.get("requested_risk_pct")),
             "mark": mark, "floating_pnl": pnl, "current_r": current_r,
             "entry_time_utc": data.get("entry_time_utc"), "mark_time_utc": mark_time,
@@ -448,7 +467,8 @@ def prop_desk_state(
         closed_rows.append({
             "trade_id": row.get("trade_id"), "symbol": row.get("cfd_symbol"), "side": row.get("side"),
             "exit_time_utc": row.get("exit_time_utc"), "result_r": _finite(row.get("result_r")),
-            "realized_pnl": pnl, "lots": _finite(row.get("lots")), "risk_usd": _finite(row.get("actual_risk")),
+            "realized_pnl": pnl, "lots": _finite(row.get("lots")), "risk_usd": _effective_risk_usd(row),
+            "entry": _effective_entry(row), "planned_entry": _finite(row.get("entry")), "fill_timeframe": row.get("fill_timeframe"),
             "first_exit": row.get("first_exit"),
         })
     closed_rows.sort(key=lambda x: str(x.get("exit_time_utc") or ""), reverse=True)

@@ -265,6 +265,7 @@ ENUM_TIMEFRAMES ParseHistoryTimeframe(string text)
    StringToUpper(text);
    if(text=="M1") return PERIOD_M1;
    if(text=="M5") return PERIOD_M5;
+   if(text=="M15") return PERIOD_M15;
    if(text=="H1") return PERIOD_H1;
    if(text=="D1") return PERIOD_D1;
    return PERIOD_CURRENT;

@@ -9,7 +9,7 @@ import pandas as pd
 from .trade_journal import initialize_journal, journal_connection
 
 
-CACHE_TIMEFRAMES = {"M1", "M5", "H1", "D1"}
+CACHE_TIMEFRAMES = {"M1", "M5", "M15", "H1", "D1"}
 BAR_COLUMNS = ["time", "open", "high", "low", "close", "tick_volume", "spread", "real_volume"]
 
 
