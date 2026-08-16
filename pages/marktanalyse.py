@@ -1,0 +1,2399 @@
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+
+from src.config import (
+    COMMERCIAL_RANGE_WEEKS,
+    COT_INDEX_WEEKS,
+    FORWARD_HORIZONS_WEEKS,
+    INDEX_LOWER,
+    INDEX_UPPER,
+    NC_CONFIRMING_WEEKS,
+    NC_DIVERGENCE_WEEKS,
+    NC_MIN_ACTIVE_BUILD_SHARE,
+    NC_MIN_ACTIVE_LEG_GROSS_PCT,
+    NC_MIN_NET_CHANGE_GROSS_PCT,
+    NC_MIN_PRICE_MOVE_PCT,
+    NC_DIV_FLOW_WINDOW_W,
+    NC_DIV_PATH_WINDOW_W,
+    NC_DIV_PRICE_WINDOW_W,
+    NC_DIV_STANDARDIZE_HIST_W,
+    NC_DIV_USE_OI_NORM,
+    NC_DIV_Z_THRESHOLD,
+    NET_LOWER_PERCENTILE,
+    NET_UPPER_PERCENTILE,
+    NET_VALIDATION_WEEKS,
+    RELEASE_ACTIVE_WEEKS,
+    SEASONAL_FORWARD_HORIZONS_DAYS,
+    SEASONAL_HISTORY_WINDOWS,
+    SEASONAL_OUTLIER_IQR_FACTOR,
+    SEASONAL_PRIMARY_HORIZON_DAYS,
+)
+from src.analysis import (
+    attach_cot_prices,
+    build_events,
+    classify_positioning_bias,
+    commercial_range_state,
+    cot_index,
+    current_signal,
+    enrich_cot,
+    hedger_cycle_state,
+    historical_hedger_releases,
+    historical_nc_divergences_legacy,
+    net_validation,
+    nc_divergence_legacy,
+    positioning_velocity_state,
+    summarize_events,
+    summarize_releases,
+)
+from src.cftc import load_cftc_universe, load_history, resolve_market
+from src.cftc_reports import (
+    DATASETS,
+    load_report_history,
+    load_report_universe,
+    primary_report_for_asset_class,
+    resolve_report_market,
+)
+from src.markets import CLASSIC_MARKETS
+from src.prices import load_prices, price_alignment_audit
+from src.publication import publication_info
+from src.report_analysis import enrich_report_positioning
+from src.nc_divergence import (
+    build_divergence_history,
+    current_divergence,
+    historical_divergence_events,
+    redundancy_metrics,
+)
+from src.seasonality import forward_statistics, seasonal_consistency, seasonal_forward_path
+from src.watchlist_seasonality_core import (
+    classify_asset_seasonality,
+    summarize_multi_horizon,
+)
+from src.style import (
+    apply_style,
+    context_strip,
+    definition,
+    page_header,
+    section_line,
+    stage_summary,
+    metric_card,
+    plotly_config,
+    tradingview_chart,
+    tradingview_plotly_chart,
+)
+
+apply_style()
+
+
+ASSET_CLASS_DE = {
+    "Currencies": "Währungen",
+    "Cryptocurrencies": "Kryptowährungen",
+    "Forest Products": "Forstprodukte",
+    "Rates": "US-Zinsen",
+    "Volatility": "Volatilität",
+    "Energy": "Energie",
+    "Metals": "Metalle",
+    "Grains": "Getreide",
+    "Livestock": "Vieh",
+    "Soft Commodities": "Soft-Rohstoffe",
+    "Indices": "Indizes",
+}
+
+MARKET_NAME_DE = {
+    "Euro FX": "Euro",
+    "British Pound": "Britisches Pfund",
+    "Japanese Yen": "Japanischer Yen",
+    "Swiss Franc": "Schweizer Franken",
+    "Canadian Dollar": "Kanadischer Dollar",
+    "Australian Dollar": "Australischer Dollar",
+    "New Zealand Dollar": "Neuseeland-Dollar",
+    "Mexican Peso": "Mexikanischer Peso",
+    "U.S. Dollar Index": "US-Dollar-Index",
+    "Brazilian Real": "Brasilianischer Real",
+    "South African Rand": "Südafrikanischer Rand",
+    "Bitcoin": "Bitcoin",
+    "Ether": "Ethereum / Ether",
+    "WTI Crude Oil": "WTI-Rohöl",
+    "Brent Crude Oil": "Brent-Rohöl",
+    "Natural Gas": "Erdgas",
+    "RBOB Gasoline": "RBOB-Benzin",
+    "Heating Oil / ULSD": "Heizöl / ULSD",
+    "Gold": "Gold",
+    "Silver": "Silber",
+    "Copper": "Kupfer",
+    "Platinum": "Platin",
+    "Palladium": "Palladium",
+    "Corn": "Mais",
+    "Wheat (SRW)": "Weizen (SRW)",
+    "Wheat (HRW)": "Weizen (HRW)",
+    "Wheat (HR Spring)": "Weizen (Hard Red Spring)",
+    "Rough Rice": "Rough Rice",
+    "Canola": "Canola",
+    "Soybeans": "Sojabohnen",
+    "Soybean Meal": "Sojaschrot",
+    "Soybean Oil": "Sojaöl",
+    "Live Cattle": "Lebendrind",
+    "Feeder Cattle": "Mastrind",
+    "Lean Hogs": "Magere Schweine",
+    "Coffee C": "Kaffee C",
+    "Cocoa": "Kakao",
+    "Sugar No. 11": "Zucker Nr. 11",
+    "Cotton No. 2": "Baumwolle Nr. 2",
+    "Orange Juice": "Orangensaft",
+    "Lumber": "Bauholz / Lumber",
+    "U.S. Treasury 2Y Note": "US Treasury 2Y",
+    "U.S. Treasury 5Y Note": "US Treasury 5Y",
+    "U.S. Treasury 10Y Note": "US Treasury 10Y",
+    "U.S. Treasury Bond 30Y": "US Treasury 30Y",
+    "Ultra U.S. Treasury Bond": "Ultra US Treasury Bond",
+    "VIX Futures": "VIX Futures",
+    "E-mini S&P 500": "E-mini S&P 500",
+    "E-mini Nasdaq-100": "E-mini Nasdaq-100",
+    "E-mini Dow": "E-mini Dow",
+    "E-mini Russell 2000": "E-mini Russell 2000",
+}
+
+STATUS_DE = {
+    # Allgemeine Richtung
+    "BULLISH": "BULLISCH",
+    "BEARISH": "BÄRISCH",
+    "NEUTRAL": "NEUTRAL",
+
+    # Positionierungszustände
+    "BULLISH CONFIRMED": "BULLISCH BESTÄTIGT",
+    "BEARISH CONFIRMED": "BÄRISCH BESTÄTIGT",
+    "BULLISH BIAS": "BULLISCHER BIAS",
+    "BEARISH BIAS": "BÄRISCHER BIAS",
+    "BULLISH INDEX EXTREME": "BULLISCHES INDEX-EXTREM",
+    "BEARISH INDEX EXTREME": "BÄRISCHES INDEX-EXTREM",
+    "BULLISH WATCH": "BULLISCH BEOBACHTEN",
+    "BEARISH WATCH": "BÄRISCH BEOBACHTEN",
+
+    # Validierung
+    "NO CONFIRMATION": "KEINE BESTÄTIGUNG",
+    "CONFIRMED": "BESTÄTIGT",
+    "PARTIAL": "TEILWEISE BESTÄTIGT",
+    "UNCONFIRMED": "NICHT BESTÄTIGT",
+
+    # Range
+    "NO RANGE DATA": "KEINE RANGE-DATEN",
+    "AT / NEAR RANGE HIGH": "AM / NAHE RANGE-HOCH",
+    "AT / NEAR RANGE LOW": "AM / NAHE RANGE-TIEF",
+    "UPPER RANGE": "OBERE RANGE",
+    "LOWER RANGE": "UNTERE RANGE",
+    "MID RANGE": "MITTLERE RANGE",
+    "HIGH": "HOCH",
+    "LOW": "TIEF",
+
+    # Velocity
+    "NO VELOCITY DATA": "KEINE DYNAMIKDATEN",
+    "COMMERCIAL NET RISING": "COMMERCIAL-NETTO STEIGT",
+    "COMMERCIAL NET FALLING": "COMMERCIAL-NETTO FÄLLT",
+    "COMMERCIAL NET FLAT": "COMMERCIAL-NETTO UNVERÄNDERT",
+    "CONFIRMING BULLISH": "BESTÄTIGT BULLISCH",
+    "NOT CONFIRMING BULLISH": "BESTÄTIGT BULLISCH NICHT",
+    "CONFIRMING BEARISH": "BESTÄTIGT BÄRISCH",
+    "NOT CONFIRMING BEARISH": "BESTÄTIGT BÄRISCH NICHT",
+    "NO ACTIVE DIRECTION": "KEINE AKTIVE RICHTUNG",
+
+    # Hedger-Zyklus
+    "NO CYCLE DATA": "KEINE ZYKLUSDATEN",
+    "NO ACTIVE CYCLE": "KEIN AKTIVER ZYKLUS",
+    "ENTERING BULLISH EXTREME": "EINTRITT IN BULLISCHES EXTREM",
+    "BULLISH EXTREME · PERSISTENCE": "BULLISCHES EXTREM · PERSISTENZ",
+    "ENTERING BEARISH EXTREME": "EINTRITT IN BÄRISCHES EXTREM",
+    "BEARISH EXTREME · PERSISTENCE": "BÄRISCHES EXTREM · PERSISTENZ",
+    "BULLISH RELEASE": "BULLISCHER RELEASE",
+    "BEARISH RELEASE": "BÄRISCHER RELEASE",
+    "BULLISH RELEASE · ACTIVE": "BULLISCHER RELEASE · AKTIV",
+    "BEARISH RELEASE · ACTIVE": "BÄRISCHER RELEASE · AKTIV",
+    "POST-RELEASE / NO ACTIVE CYCLE": "NACH RELEASE / KEIN AKTIVER ZYKLUS",
+
+    # NC-Divergenz
+    "NOT ENOUGH DATA": "ZU WENIG DATEN",
+    "INVALID BASE": "UNGÜLTIGE BERECHNUNGSBASIS",
+    "BULLISH · ACTIVE LONG BUILD": "BULLISCH · AKTIVER LONG-AUFBAU",
+    "BULLISH · SHORT COVERING": "BULLISCH · SHORT-EINDECKUNG",
+    "BULLISH · NET BUILD": "BULLISCH · NETTO-AUFBAU",
+    "BEARISH · ACTIVE SHORT BUILD": "BÄRISCH · AKTIVER SHORT-AUFBAU",
+    "BEARISH · MIXED DISTRIBUTION": "BÄRISCH · GEMISCHTE DISTRIBUTION",
+    "LONG LIQUIDATION / PROFIT TAKING": "LONG-LIQUIDATION / GEWINNMITNAHMEN",
+    "BEARISH · NET REDUCTION": "BÄRISCH · NETTO-ABBAU",
+    "NO DIVERGENCE": "KEINE DIVERGENZ",
+    "BULLISH DIVERGENCE": "BULLISCHE DIVERGENZ",
+    "BEARISH DIVERGENCE": "BÄRISCHE DIVERGENZ",
+    "PRICE ALIGNMENT INVALID": "PREIS-AUSRICHTUNG UNGÜLTIG",
+    "STRONGLY BULLISH FLOW": "STARK BULLISHER FLOW",
+    "STRONGLY BEARISH FLOW": "STARK BÄRISCHER FLOW",
+    "BULLISH FLOW": "BULLISHER FLOW",
+    "BEARISH FLOW": "BÄRISCHER FLOW",
+    "NEUTRAL FLOW": "NEUTRALER FLOW",
+    "NO FLOW DATA": "KEINE FLOW-DATEN",
+    "NO LEG DATA": "KEINE SCHENKELDATEN",
+    "MISSING COT WEEK": "COT-WOCHE FEHLT",
+    "ACTIVE LONG BUILD + SHORT COVERING": "LONG-AUFBAU + SHORT-EINDECKUNG",
+    "LONG LIQUIDATION + ACTIVE SHORT BUILD": "LONG-LIQUIDATION + AKTIVER SHORT-AUFBAU",
+    "ACTIVE LONG BUILD": "AKTIVER LONG-AUFBAU",
+    "SHORT COVERING": "SHORT-EINDECKUNG",
+    "ACTIVE SHORT BUILD": "AKTIVER SHORT-AUFBAU",
+    "MIXED / LOW ACTIVITY": "GEMISCHT / GERINGE AKTIVITÄT",
+
+    # Historische Gruppen
+    "ALL RELEASES": "ALLE RELEASES",
+    "BULLISH RELEASES": "BULLISCHE RELEASES",
+    "BEARISH RELEASES": "BÄRISCHE RELEASES",
+    "ALL INDEX SIGNALS": "ALLE INDEX-SIGNALE",
+    "NETTO BESTÄTIGT": "NETTO BESTÄTIGT",
+}
+
+def de_status(value):
+    if value is None:
+        return "—"
+    return STATUS_DE.get(str(value), str(value))
+
+def de_date(value):
+    if value is None or pd.isna(value):
+        return "—"
+    return pd.Timestamp(value).strftime("%d.%m.%Y")
+
+def de_nearest(value):
+    return {"HIGH": "Hoch", "LOW": "Tief"}.get(str(value), str(value))
+
+
+page_header(
+    "Einzelmarkt · Positionierungsanalyse",
+    "COT Marktanalyse",
+    "Wo steht dieser Markt im Positionierungszyklus?",
+    "V3.4.4.4 · TRADINGVIEW Y-SCALE",
+)
+
+nav_back_col, nav_hint_col = st.columns([0.22, 0.78])
+with nav_back_col:
+    st.page_link(
+        "pages/watchlist.py",
+        label="← COT Watchlist",
+        icon=":material/arrow_back:",
+    )
+with nav_hint_col:
+    st.caption(
+        "Die Marktanalyse beschreibt sechs getrennte Research-Stufen. "
+        "Sie erzeugt keine Einstiegs-, Stop- oder Kurszielvorschläge."
+    )
+
+
+
+# Markt-Kontext aus Watchlist / Research / Datenmodell übernehmen.
+_pending_market = st.session_state.pop("_market_context_handoff", None)
+_selected_market = st.session_state.get("selected_market")
+
+if _pending_market:
+    st.session_state["asset_class_select"] = _pending_market["asset_class"]
+    st.session_state["market_select"] = _pending_market["market_name"]
+elif _selected_market and "asset_class_select" not in st.session_state:
+    st.session_state["asset_class_select"] = _selected_market["asset_class"]
+    st.session_state["market_select"] = _selected_market["market_name"]
+
+with st.sidebar:
+    st.markdown("## Markt")
+    asset_class = st.selectbox(
+        "Assetklasse",
+        list(CLASSIC_MARKETS.keys()),
+        format_func=lambda x: ASSET_CLASS_DE.get(x, x),
+        key="asset_class_select",
+    )
+    names = [m["name"] for m in CLASSIC_MARKETS[asset_class]]
+    if st.session_state.get("market_select") not in names:
+        st.session_state["market_select"] = names[0]
+    market_name = st.selectbox(
+        "Kontrakt",
+        names,
+        format_func=lambda x: MARKET_NAME_DE.get(x, x),
+        key="market_select",
+    )
+    market = next(
+        m for m in CLASSIC_MARKETS[asset_class]
+        if m["name"] == market_name
+    )
+
+    st.session_state["selected_market"] = {
+        "asset_class": asset_class,
+        "market_name": market_name,
+    }
+
+    st.markdown("---")
+    st.markdown("## Feste Methodik")
+
+    cot_weeks = COT_INDEX_WEEKS
+    upper = INDEX_UPPER
+    lower = INDEX_LOWER
+
+    validation_weeks = NET_VALIDATION_WEEKS
+    validation_upper = NET_UPPER_PERCENTILE
+    validation_lower = NET_LOWER_PERCENTILE
+    range_weeks = COMMERCIAL_RANGE_WEEKS
+
+    nc_lookback = NC_DIVERGENCE_WEEKS
+    nc_min_confirming = NC_CONFIRMING_WEEKS
+    nc_min_price_move = NC_MIN_PRICE_MOVE_PCT
+    nc_min_net_move = NC_MIN_NET_CHANGE_GROSS_PCT
+    nc_min_active_leg = NC_MIN_ACTIVE_LEG_GROSS_PCT
+    nc_active_share = NC_MIN_ACTIVE_BUILD_SHARE
+
+    horizons = list(FORWARD_HORIZONS_WEEKS)
+
+    seasonal_primary_horizon = SEASONAL_PRIMARY_HORIZON_DAYS
+    seasonal_outlier_factor = SEASONAL_OUTLIER_IQR_FACTOR
+
+    st.caption(
+        f"COT-Index {cot_weeks}W · {upper}/{lower}  \n"
+        f"Netto-Historie {validation_weeks}W · "
+        f"{validation_upper}/{validation_lower}  \n"
+        f"Commercial-Range {range_weeks}W  \n"
+        f"Spec-Flow {NC_DIV_FLOW_WINDOW_W}W · Pfad {NC_DIV_PATH_WINDOW_W}W · "
+        f"robuste Historie {NC_DIV_STANDARDIZE_HIST_W}W  \n"
+        f"Legacy-NC parallel: {nc_lookback}W · {nc_min_confirming} bestätigende Wochen  \n"
+        f"Forward {horizons[0]}W / {horizons[-1]}W · Saison-IQR {seasonal_outlier_factor:.2f}"
+    )
+
+    st.markdown("---")
+    st.markdown("## Saisonalitätsdarstellung")
+    seasonal_curve_windows = st.multiselect(
+        "Saisonkurven anzeigen",
+        list(SEASONAL_HISTORY_WINDOWS),
+        default=[5, 10, 15, 30],
+        format_func=lambda x: f"{x} Jahre",
+        help="Nur Darstellung. Die statistische Konsistenzprüfung verwendet "
+             "immer alle festgelegten Historienfenster.",
+    )
+    if not seasonal_curve_windows:
+        seasonal_curve_windows = [10, 30]
+
+    st.markdown("---")
+    st.markdown("## Datenquelle")
+    price_ticker = st.text_input("Preis-Ticker", value=market["ticker"])
+    if market.get("price_note"):
+        st.caption(market["price_note"])
+    st.caption(
+        "Tagespreise werden je COT-Stichtag auf den letzten Schlusskurs ≤ Dienstag ausgerichtet. Keine Freitag-Wochenaggregation."
+    )
+
+try:
+    universe = load_cftc_universe()
+except Exception as exc:
+    st.error(
+        "Die CFTC-Datenquelle konnte nicht geladen werden. "
+        "Internetverbindung prüfen und die Seite neu laden."
+    )
+    with st.expander("Technische Details"):
+        st.code(str(exc))
+    st.stop()
+
+resolved = resolve_market(market, universe)
+if not resolved:
+    st.error(
+        f"Für {market['name']} konnte keine eindeutige klassische "
+        "Legacy-COT-Serie aufgelöst werden."
+    )
+    st.stop()
+
+code = resolved["cftc_contract_market_code"]
+
+try:
+    raw_cot = load_history(code)
+except Exception as exc:
+    st.error("Die historische COT-Serie konnte nicht geladen werden.")
+    with st.expander("Technische Details"):
+        st.code(str(exc))
+    st.stop()
+
+if raw_cot.empty:
+    st.warning(
+        "Für den ausgewählten Markt wurden keine historischen "
+        "Legacy-COT-Daten gefunden."
+    )
+    st.stop()
+
+cot = enrich_cot(
+    raw_cot,
+    weeks=cot_weeks,
+    validation_weeks=validation_weeks,
+    range_weeks=range_weeks,
+)
+
+# Display-only comparison layer: Legacy Non-Commercial position inside the
+# same 26W Min/Max framework as Commercials and Retail.
+cot["noncommercial_index"] = cot_index(
+    cot["noncommercial_net"],
+    cot_weeks,
+)
+
+valid = cot.dropna(
+    subset=[
+        "commercial_index",
+        "retail_index",
+        "commercial_net_percentile",
+        "retail_net_percentile",
+    ]
+)
+
+if valid.empty:
+    st.warning(
+        f"Für {market['name']} sind nicht genügend Wochen vorhanden, "
+        f"um den {cot_weeks}-Wochen-COT-Index und die "
+        f"{validation_weeks}-Wochen-Netto-Validierung gleichzeitig zu berechnen."
+    )
+    st.stop()
+
+latest = valid.iloc[-1]
+latest_publication = publication_info(latest["report_date"])
+signal = current_signal(latest, upper, lower)
+positioning = classify_positioning_bias(
+    latest,
+    upper=upper,
+    lower=lower,
+    validation_upper=validation_upper,
+    validation_lower=validation_lower,
+)
+range_state = commercial_range_state(latest)
+velocity = positioning_velocity_state(latest, direction=positioning["direction"])
+cycle = hedger_cycle_state(cot, upper=upper, lower=lower, release_active_weeks=RELEASE_ACTIVE_WEEKS)
+
+prices = load_prices(price_ticker, raw_cot["report_date"].min())
+
+seasonal_stats = forward_statistics(
+    prices,
+    history_windows=SEASONAL_HISTORY_WINDOWS,
+    horizons=SEASONAL_FORWARD_HORIZONS_DAYS,
+)
+seasonal_state = seasonal_consistency(
+    seasonal_stats,
+    primary_horizon=10,
+    required_windows=SEASONAL_HISTORY_WINDOWS,
+    reference_years=30,
+)
+
+# Watchlist-identische 20J / 20-40-60T Confluence.
+market_multi_seasonality = {}
+for _horizon in (20, 40, 60):
+    _rows = seasonal_stats[
+        (seasonal_stats["historie_jahre"] == 20)
+        & (seasonal_stats["horizont_tage"] == _horizon)
+    ] if seasonal_stats is not None and not seasonal_stats.empty else pd.DataFrame()
+
+    if _rows.empty:
+        market_multi_seasonality[_horizon] = {
+            "support": "N/V",
+            "display": "— N/V",
+            "supports": False,
+            "detail": "Keine ausreichende 20J-Historie",
+        }
+    else:
+        _row = _rows.iloc[0]
+        market_multi_seasonality[_horizon] = classify_asset_seasonality(
+            cot_direction=int(positioning["direction"]),
+            sample_size=int(_row["stichprobe"]),
+            positive_years=int(_row["positive_jahre"]),
+            positive_rate=float(_row["trefferquote_positiv"]),
+            base_rate=float(_row["basisrate_positiv"]),
+            median_return=float(_row["median_rendite"]),
+        )
+
+market_multi_seasonality_summary = summarize_multi_horizon(
+    market_multi_seasonality
+)
+
+seasonal_paths = {}
+for years in seasonal_curve_windows:
+    seasonal_paths[int(years)] = seasonal_forward_path(
+        prices,
+        years=int(years),
+        max_forward_days=60,
+        outlier_factor=float(seasonal_outlier_factor),
+    )
+
+cot_with_prices = attach_cot_prices(cot, prices)
+price_audit = price_alignment_audit(cot_with_prices)
+
+# Legacy-Definition bleibt parallel lauffähig und wird nur als Vergleich geführt.
+nc_div_legacy = nc_divergence_legacy(
+    cot_with_prices,
+    lookback_weeks=int(nc_lookback),
+    min_confirming_weeks=int(nc_min_confirming),
+    min_active_leg_weeks=min(2, int(nc_lookback)),
+    min_price_move_pct=float(nc_min_price_move),
+    min_net_change_pct=float(nc_min_net_move),
+    min_active_leg_pct=float(nc_min_active_leg),
+    active_leg_share=float(nc_active_share),
+)
+
+# Neue robuste Definition zunächst ebenfalls auf Legacy NC berechnen. Sie dient als
+# methodischer Kontrollpfad für den Alt-vs.-Neu-Vergleich.
+nc_div_new_legacy = current_divergence(
+    cot_with_prices,
+    long_col="noncommercial_long",
+    short_col="noncommercial_short",
+    group_label="Legacy Non-Commercial",
+)
+
+# Primäre spekulative Ebene: Managed Money für Rohstoffe, Leveraged Funds für
+# Finanz-Futures. Fällt die moderne Reportserie aus, wird transparent auf den
+# neuen Legacy-NC-Pfad zurückgefallen.
+modern_report_type = primary_report_for_asset_class(asset_class)
+spec_group_key = "managed_money" if modern_report_type == "disaggregated" else "leveraged_funds"
+spec_group_label = "Managed Money" if spec_group_key == "managed_money" else "Leveraged Funds"
+modern_source_label = DATASETS[modern_report_type]["label"]
+modern_aligned = pd.DataFrame()
+modern_enriched = pd.DataFrame()
+modern_resolved = None
+modern_error = None
+
+try:
+    modern_universe = load_report_universe(modern_report_type)
+    modern_resolved = resolve_report_market(market, modern_universe)
+    if modern_resolved:
+        modern_raw = load_report_history(
+            modern_report_type,
+            modern_resolved["cftc_contract_market_code"],
+        )
+        if not modern_raw.empty:
+            modern_enriched = enrich_report_positioning(
+                modern_raw,
+                report_type=modern_report_type,
+                index_weeks=COT_INDEX_WEEKS,
+                validation_weeks=NET_VALIDATION_WEEKS,
+            )
+            modern_aligned = attach_cot_prices(modern_enriched, prices)
+except Exception as exc:
+    modern_error = str(exc)
+
+if not modern_aligned.empty:
+    spec_price_audit = price_alignment_audit(modern_aligned)
+    spec_div = current_divergence(
+        modern_aligned,
+        long_col=f"{spec_group_key}_long",
+        short_col=f"{spec_group_key}_short",
+        group_label=spec_group_label,
+    )
+    spec_source = f"{spec_group_label} · {modern_source_label}"
+    spec_latest = modern_enriched.iloc[-1]
+    spec_level_pct = float(spec_latest.get(f"{spec_group_key}_net_oi_percentile", np.nan))
+else:
+    spec_price_audit = price_audit
+    spec_div = nc_div_new_legacy
+    spec_source = "Legacy Non-Commercial · Fallback"
+    spec_level_pct = float(latest.get("noncommercial_net_percentile", np.nan))
+
+
+validation_direction = (
+    "BULLISH" if positioning["direction"] > 0
+    else "BEARISH" if positioning["direction"] < 0
+    else "NEUTRAL"
+)
+validation = net_validation(
+    latest,
+    validation_direction,
+    upper=validation_upper,
+    lower=validation_lower,
+)
+
+comm_net_pct = float(latest["commercial_net_percentile"])
+retail_net_pct = float(latest["retail_net_percentile"])
+nc_net_pct = float(latest["noncommercial_net_percentile"])
+comm_oi_pct = float(latest["commercial_net_oi_percentile"])
+retail_oi_pct = float(latest["retail_net_oi_percentile"])
+
+oi_change_4w = float(latest["open_interest_change_4w"])
+oi_change_4w_pct = float(latest["open_interest_change_4w_pct"])
+oi_change_4w_percentile = float(latest["open_interest_change_4w_percentile"])
+
+
+
+# ------------------------------------------------------------------
+# Compact research hierarchy
+# ------------------------------------------------------------------
+def _fmt_contracts(value):
+    return "—" if pd.isna(value) else f"{value:+,.0f}"
+
+def _fmt_pct(value, digits=1):
+    return "—" if pd.isna(value) else f"{value:.{digits}f}"
+
+def _nc_level_label(net_value, percentile):
+    if pd.isna(percentile):
+        return "KEINE LEVEL-DATEN"
+    if percentile <= 20:
+        return "EXTREM NETTO-SHORT" if net_value < 0 else "HISTORISCH NIEDRIGES NETTO"
+    if percentile >= 80:
+        return "EXTREM NETTO-LONG" if net_value > 0 else "HISTORISCH HOHES NETTO"
+    return "MITTLERE POSITIONIERUNG"
+
+def _flow_label(change_4w, percentile):
+    if pd.isna(change_4w) or pd.isna(percentile):
+        return "KEINE FLOW-DATEN"
+    if change_4w > 0:
+        return "NETTO STEIGT"
+    if change_4w < 0:
+        return "NETTO FÄLLT"
+    return "NETTO UNVERÄNDERT"
+
+def _acceleration_label(change_4w, acceleration):
+    if pd.isna(change_4w) or pd.isna(acceleration):
+        return "—"
+    if (change_4w > 0 and acceleration > 0) or (change_4w < 0 and acceleration < 0):
+        return "BESCHLEUNIGEND"
+    if acceleration == 0:
+        return "KONSTANT"
+    return "VERLANGSAMEND / DREHEND"
+
+weeks_since_release_text = (
+    "—"
+    if pd.isna(cycle.get("weeks_since_release", np.nan))
+    else f"{int(cycle['weeks_since_release'])}W seit Release"
+)
+
+range_distance_text = (
+    "—"
+    if pd.isna(range_state.get("distance_pct", np.nan))
+    else f"{range_state['distance_pct']:.1f}% vom {de_nearest(range_state['nearest'])}"
+)
+
+nc_flow_pct = float(latest["noncommercial_change_4w_percentile"])
+nc_flow_change = float(latest["noncommercial_change_4w"])
+nc_level_label = _nc_level_label(float(latest["noncommercial_net"]), nc_net_pct)
+nc_flow_label = _flow_label(nc_flow_change, nc_flow_pct)
+nc_index = float(latest.get("noncommercial_index", np.nan))
+
+def _legacy_nc_crowding_context(
+    commercial_pct,
+    nc_pct,
+    nc_change_4w,
+    nc_change_pct,
+):
+    """
+    Descriptive context only.
+
+    Commercial and Legacy Non-Commercial positions are mechanically linked,
+    so this must never be counted as an independent confirmation.
+    """
+    if any(pd.isna(v) for v in (commercial_pct, nc_pct)):
+        return {
+            "state": "N/V",
+            "detail": "Nicht genügend Netto-Historie.",
+            "tone": "",
+        }
+
+    if nc_pct >= validation_upper and commercial_pct <= validation_lower:
+        if not pd.isna(nc_change_4w) and nc_change_4w < 0:
+            return {
+                "state": "LONG-CROWDING · DREHT AB",
+                "detail": (
+                    f"NC {nc_pct:.1f}. Perzentil vs. Commercial {commercial_pct:.1f}. "
+                    f"NC Δ4W {_fmt_contracts(nc_change_4w)}; aus extremer Long-Positionierung "
+                    "wird abgebaut. Das erhöht den Reversal-/Top-Watch-Kontext, "
+                    "ist aber kein eigenständiges Top-Signal."
+                ),
+                "tone": "bear",
+            }
+        return {
+            "state": "LONG-CROWDING · TREND AKTIV",
+            "detail": (
+                f"NC {nc_pct:.1f}. Perzentil vs. Commercial {commercial_pct:.1f}. "
+                "Spekulanten sind historisch stark long, Commercials stark auf der "
+                "Gegenseite. Ein Extrem allein bedeutet noch keinen Top."
+            ),
+            "tone": "",
+        }
+
+    if nc_pct <= validation_lower and commercial_pct >= validation_upper:
+        if not pd.isna(nc_change_4w) and nc_change_4w > 0:
+            return {
+                "state": "SHORT-CROWDING · DREHT AB",
+                "detail": (
+                    f"NC {nc_pct:.1f}. Perzentil vs. Commercial {commercial_pct:.1f}. "
+                    f"NC Δ4W {_fmt_contracts(nc_change_4w)}; extreme Short-Positionierung "
+                    "wird zurückgenommen. Das erhöht den Reversal-/Bottom-Watch-Kontext, "
+                    "ist aber kein eigenständiges Bottom-Signal."
+                ),
+                "tone": "bull",
+            }
+        return {
+            "state": "SHORT-CROWDING · TREND AKTIV",
+            "detail": (
+                f"NC {nc_pct:.1f}. Perzentil vs. Commercial {commercial_pct:.1f}. "
+                "Spekulanten sind historisch stark short, Commercials stark auf der "
+                "Gegenseite. Ein Extrem allein bedeutet noch keinen Boden."
+            ),
+            "tone": "",
+        }
+
+    return {
+        "state": "KEINE GEGENLÄUFIGE EXTREMLAGE",
+        "detail": (
+            f"NC {nc_pct:.1f}. Perzentil · Commercial {commercial_pct:.1f}. Perzentil. "
+            "Aktuell liegt keine klassische Commercial-vs.-NC-Crowding-Konstellation vor."
+        ),
+        "tone": "",
+    }
+
+nc_crowding = _legacy_nc_crowding_context(
+    comm_net_pct,
+    nc_net_pct,
+    nc_flow_change,
+    nc_flow_pct,
+)
+
+# Primäre Stufe 5 verwendet den robusten, OI-normalisierten spekulativen Flow.
+spec_flow_raw = float(spec_div.get("d_flow_raw_4w", np.nan))
+spec_flow_oi = float(spec_div.get("d_flow_4w", np.nan))
+spec_z_flow = float(spec_div.get("z_flow", np.nan))
+spec_z_price = float(spec_div.get("z_price", np.nan))
+spec_rho = float(spec_div.get("rho", np.nan))
+spec_strength = float(spec_div.get("divergence_strength", np.nan))
+spec_strength_pct = float(spec_div.get("divergence_strength_percentile", np.nan))
+spec_strength_ref_n = int(spec_div.get("divergence_strength_reference_n", 0) or 0)
+accel_label = _acceleration_label(
+    float(latest["commercial_change_4w"]),
+    float(latest["commercial_acceleration_4w"]),
+)
+
+def _index_context(value):
+    if pd.isna(value):
+        return "n/v"
+    if value >= upper:
+        return f"{value:.1f} · oberes Extrem ab {upper}"
+    if value <= lower:
+        return f"{value:.1f} · unteres Extrem bis {lower}"
+    return f"{value:.1f} · neutral zwischen {lower} und {upper}"
+
+def _percentile_context(value, high, low):
+    if pd.isna(value):
+        return "n/v"
+    if value >= high:
+        return f"{value:.1f} · historisch hoch ab {high}"
+    if value <= low:
+        return f"{value:.1f} · historisch niedrig bis {low}"
+    return f"{value:.1f} · mittlerer Bereich"
+
+def _direction_tone(text):
+    value = str(text).upper()
+    if "BULL" in value:
+        return "bull"
+    if "BÄR" in value or "BEAR" in value:
+        return "bear"
+    return ""
+
+context_strip(
+    [
+        ("Markt", f"{market['symbol']} · {MARKET_NAME_DE.get(market['name'], market['name'])}"),
+        ("CFTC-Code", str(code)),
+        ("Positionen", de_date(latest["report_date"])),
+        ("Veröffentlicht", de_date(latest_publication["publication_date"])),
+    ]
+)
+
+st.caption(
+    f"Offizielle CFTC-Serie: {resolved.get('market_and_exchange_names','')} · "
+    f"Preis-Proxy: {price_ticker}"
+)
+
+action_a, action_b, action_c = st.columns([0.34, 0.33, 0.33])
+with action_a:
+    st.page_link(
+        "pages/watchlist.py",
+        label="← Watchlist",
+        icon=":material/view_list:",
+    )
+with action_b:
+    if st.button(
+        "Research Lab · gleicher Markt",
+        key="open_research_same_market",
+        use_container_width=True,
+    ):
+        st.session_state["_market_context_handoff"] = {
+            "asset_class": asset_class,
+            "market_name": market_name,
+        }
+        st.switch_page("pages/research_lab.py")
+with action_c:
+    if st.button(
+        "Datenmodell · gleicher Markt",
+        key="open_data_same_market",
+        use_container_width=True,
+    ):
+        st.session_state["_market_context_handoff"] = {
+            "asset_class": asset_class,
+            "market_name": market_name,
+        }
+        st.switch_page("pages/datenmodell.py")
+
+stage_summary(
+    [
+        {
+            "label": "COT-Index",
+            "primary": (
+                f"Commercial {_index_context(float(latest['commercial_index']))}"
+            ),
+            "detail": (
+                f"Non-Commercial {_index_context(nc_index)} · "
+                f"Retail {_index_context(float(latest['retail_index']))}. "
+                f"COT-Index = Position innerhalb des {cot_weeks}W-Min/Max-Fensters."
+            ),
+            "tone": _direction_tone(positioning["state"]),
+        },
+        {
+            "label": "Netto-Validierung",
+            "primary": de_status(validation["status"]),
+            "detail": (
+                f"Commercial-Netto {_percentile_context(comm_net_pct, validation_upper, validation_lower)} · "
+                f"Non-Commercial-Netto {_percentile_context(nc_net_pct, validation_upper, validation_lower)} · "
+                f"Retail-Netto {_percentile_context(retail_net_pct, validation_upper, validation_lower)} · "
+                f"{de_status(range_state['state'])}. NC dient hier als Trend-/Crowding-Kontext, "
+                "nicht als zusätzliche unabhängige Bestätigung."
+            ),
+            "tone": "",
+        },
+        {
+            "label": "Positionierungs-Velocity",
+            "primary": (
+                f"Δ4W {_fmt_contracts(latest['commercial_change_4w'])} Kontrakte · "
+                f"{latest['commercial_change_4w_percentile']:.1f}. Perzentil"
+            ),
+            "detail": (
+                f"{accel_label} · 4W-Beschleunigung "
+                f"{_fmt_contracts(latest['commercial_acceleration_4w'])} Kontrakte."
+            ),
+            "tone": "",
+        },
+        {
+            "label": "Hedger-Zyklus",
+            "primary": de_status(cycle["state"]),
+            "detail": (
+                f"Extremdauer {cycle['extreme_duration']}W · {weeks_since_release_text} · "
+                "Episode-Extremindex "
+                + ("—" if pd.isna(cycle["extreme_index"]) else f"{cycle['extreme_index']:.1f}")
+                + "."
+            ),
+            "tone": _direction_tone(cycle["state"]),
+        },
+        {
+            "label": "Speculativer Flow",
+            "primary": de_status(spec_div.get("flow_label")),
+            "detail": (
+                f"{spec_source} · Netto/OI-Level "
+                + ("—" if pd.isna(spec_level_pct) else f"{spec_level_pct:.1f}. Perzentil")
+                + f" · Δ4W {_fmt_contracts(spec_flow_raw)} Kontrakte · "
+                + ("z Flow —" if pd.isna(spec_z_flow) else f"z Flow {spec_z_flow:+.2f}")
+                + f" · Divergenz: {de_status(spec_div.get('status'))}. "
+                + "Kontextfaktor; nicht automatisch eine unabhängige Commercial-Bestätigung."
+            ),
+            "tone": _direction_tone(spec_div.get("flow_label")),
+        },
+        {
+            "label": "Saisonalität",
+            "primary": seasonal_state["status"],
+            "detail": (
+                f"Nächste {seasonal_primary_horizon} Handelstage · "
+                f"{seasonal_state['detail']} · {seasonal_state['window_detail']}. "
+                f"Basisrate = Positiv-Quote aller Kalenderphasen desselben Marktes/Horizonts."
+            ),
+            "tone": _direction_tone(seasonal_state["status"]),
+        },
+    ]
+)
+
+
+st.caption(
+    "Backtest-Hinweis: Historische Forward-Renditen beginnen in V3.0 nicht "
+    "mehr am COT-Positionsstichtag. Der Publikationslag wird berücksichtigt; "
+    "dokumentierte Sonderveröffentlichungen 2023/2025 werden explizit behandelt."
+)
+
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+    [
+        "1 · COT-Index",
+        "2–3 · Netto & Flow",
+        "4 · Hedger-Zyklus",
+        "5 · Spec-Flow",
+        "6 · Saisonalität",
+        "Historie",
+        "Methodik",
+    ]
+)
+
+
+
+with tab1:
+    section_line("Stufe 1 · COT-Index", "26 Wochen · Extremgrenzen 80 / 20")
+    definition(
+        "COT-Index = Position der aktuellen Netto-Position zwischen Minimum und "
+        "Maximum des festgelegten Fensters. Commercials werden mit Legacy "
+        "Non-Commercials und Retail auf derselben 0–100-Skala verglichen. "
+        "Ein Extrem beschreibt eine Positionierungsphase, aber noch keinen Trade "
+        "oder Wendepunkt."
+    )
+    st.markdown("### Positionierungssignal")
+    st.caption(
+        "Chart-Steuerung: Mausrad = Zoom · Ziehen = Verschieben · "
+        "1J/3J/5J/MAX = Zeitraum · Doppelklick = Reset · "
+        "Y-Skala rechts ziehen = vertikal stauchen / strecken."
+    )
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=cot["report_date"],
+        y=cot["commercial_index"],
+        mode="lines",
+        name="Commercial COT-Index",
+        line=dict(width=2),
+    ))
+    fig.add_trace(go.Scatter(
+        x=cot["report_date"],
+        y=cot["noncommercial_index"],
+        mode="lines",
+        name="Non-Commercial COT-Index",
+        line=dict(width=1.8, dash="dash"),
+    ))
+    fig.add_trace(go.Scatter(
+        x=cot["report_date"],
+        y=cot["retail_index"],
+        mode="lines",
+        name="Retail COT-Index",
+        line=dict(width=1.5, dash="dot"),
+    ))
+    fig.add_hline(y=upper, line_dash="dash", opacity=.35)
+    fig.add_hline(y=lower, line_dash="dash", opacity=.35)
+    fig.update_layout(
+        height=390,
+        margin=dict(l=0, r=0, t=25, b=0),
+        yaxis=dict(range=[0, 100], title="COT-Index"),
+        xaxis_title=None,
+        legend=dict(orientation="h", y=1.08),
+    )
+    tradingview_chart(
+        fig,
+        x_values=cot["report_date"],
+        default_years=3,
+        reset_y_range=(0, 100),
+        date_axis=True,
+        uirevision=f"cot-index-{market['symbol']}",
+    )
+    tradingview_plotly_chart(
+        fig,
+        config=plotly_config(),
+    )
+
+    st.markdown("### Langfristige Netto-Positions-Perzentile")
+    st.caption(
+        "Direktvergleich auf derselben 0–100-Skala: Commercial-, Non-Commercial- "
+        "und Retail-Netto werden jeweils als rollierendes 156W-Perzentil eingeordnet. "
+        "Besonders interessant sind Phasen, in denen Commercials und "
+        "Non-Commercials an entgegengesetzten Extremen liegen."
+    )
+    fig_pct = go.Figure()
+    fig_pct.add_trace(go.Scatter(
+        x=cot["report_date"],
+        y=cot["commercial_net_percentile"],
+        mode="lines",
+        name="Commercial-Netto-Perzentil · 156W",
+        line=dict(width=2),
+    ))
+    fig_pct.add_trace(go.Scatter(
+        x=cot["report_date"],
+        y=cot["noncommercial_net_percentile"],
+        mode="lines",
+        name="Non-Commercial-Netto-Perzentil · 156W",
+        line=dict(width=1.8, dash="dash"),
+    ))
+    fig_pct.add_trace(go.Scatter(
+        x=cot["report_date"],
+        y=cot["retail_net_percentile"],
+        mode="lines",
+        name="Retail-Netto-Perzentil · 156W",
+        line=dict(width=1.5, dash="dot"),
+    ))
+    fig_pct.add_hline(
+        y=validation_upper,
+        line_dash="dash",
+        opacity=.35,
+    )
+    fig_pct.add_hline(
+        y=validation_lower,
+        line_dash="dash",
+        opacity=.35,
+    )
+    fig_pct.update_layout(
+        height=390,
+        margin=dict(l=0, r=0, t=25, b=0),
+        yaxis=dict(range=[0, 100], title="Historisches Perzentil"),
+        xaxis_title=None,
+        legend=dict(orientation="h", y=1.08),
+    )
+    tradingview_chart(
+        fig_pct,
+        x_values=cot["report_date"],
+        default_years=3,
+        reset_y_range=(0, 100),
+        date_axis=True,
+        uirevision=f"net-percentiles-{market['symbol']}",
+    )
+    tradingview_plotly_chart(
+        fig_pct,
+        config=plotly_config(),
+    )
+
+    crowd_a, crowd_b, crowd_c, crowd_d = st.columns(
+        [1.0, 1.0, 1.35, 1.15],
+        gap="small",
+    )
+    with crowd_a:
+        metric_card(
+            "Commercial Netto · 156W",
+            f"{comm_net_pct:.1f}. Perzentil",
+            _percentile_context(
+                comm_net_pct,
+                validation_upper,
+                validation_lower,
+            ),
+        )
+    with crowd_b:
+        metric_card(
+            "Non-Commercial Netto · 156W",
+            f"{nc_net_pct:.1f}. Perzentil",
+            f"Langfristiges Netto-Perzentil · 26W COT-Index {nc_index:.1f} · "
+            f"Δ4W {_fmt_contracts(nc_flow_change)}",
+        )
+    with crowd_c:
+        metric_card(
+            "Commercial ↔ NC",
+            nc_crowding["state"],
+            nc_crowding["detail"],
+        )
+    with crowd_d:
+        metric_card(
+            "Saison · 20J / 20-40-60T",
+            market_multi_seasonality_summary["compact"],
+            market_multi_seasonality_summary["overall"],
+        )
+
+    st.caption(
+        "Interpretation: Legacy Commercial und Non-Commercial sind teilweise "
+        "mechanisch Gegenseiten desselben Futures-Marktes. Deshalb ist ein "
+        "Commercial-vs.-NC-Extrem keine zusätzliche unabhängige Bestätigung. "
+        "Die Saisonspalte verwendet dieselbe 20J/20-40-60T-Logik wie die Watchlist: "
+        "✓ unterstützt den aktuellen COT-Bias, ✕ läuft dagegen, — ist gemischt."
+    )
+
+with tab2:
+    section_line("Stufe 2–3 · Netto-Validierung & Flow", "156W Struktur · 1W/4W/8W Dynamik")
+    definition(
+        "Netto-Perzentil = historischer Rang der aktuellen Netto-Position über "
+        "156 Wochen. Velocity beschreibt die Veränderung der Positionierung; "
+        "sie ist getrennt vom absoluten Niveau zu lesen."
+    )
+    st.markdown("### Netto-Positionierung")
+    fig2 = go.Figure()
+    fig2.add_trace(go.Scatter(
+        x=cot["report_date"],
+        y=cot["commercial_net"],
+        mode="lines",
+        name="Commercial Netto",
+    ))
+    fig2.add_trace(go.Scatter(
+        x=cot["report_date"],
+        y=cot["retail_net"],
+        mode="lines",
+        name="Retail Netto",
+    ))
+    fig2.add_hline(y=0, line_dash="dot", opacity=.3)
+    fig2.update_layout(
+        height=430,
+        margin=dict(l=0, r=0, t=25, b=0),
+        xaxis_title=None,
+        yaxis_title="Kontrakte",
+        legend=dict(orientation="h", y=1.08),
+    )
+    tradingview_chart(
+        fig2,
+        x_values=cot["report_date"],
+        default_years=3,
+        date_axis=True,
+        uirevision=f"net-positioning-{market['symbol']}",
+    )
+    tradingview_plotly_chart(
+        fig2,
+        config=plotly_config(),
+    )
+
+    st.markdown("#### Positionierungsdynamik · 1W / 4W / 8W")
+    velocity_table = cot[[
+        "report_date",
+        "commercial_net", "commercial_change_1w", "commercial_change_4w", "commercial_change_8w",
+        "commercial_change_4w_percentile", "commercial_acceleration_4w",
+        "retail_net", "retail_change_1w", "retail_change_4w", "retail_change_8w",
+        "noncommercial_net", "noncommercial_net_percentile",
+        "noncommercial_change_1w", "noncommercial_change_4w", "noncommercial_change_8w",
+        "noncommercial_change_4w_percentile",
+        "open_interest_all", "open_interest_change_4w",
+        "open_interest_change_4w_pct", "open_interest_change_4w_percentile",
+    ]].tail(20).sort_values("report_date", ascending=False)
+    velocity_table = velocity_table.rename(columns={
+        "report_date": "COT-Datum",
+        "commercial_net": "Commercial Netto",
+        "commercial_change_1w": "Commercial Δ1W",
+        "commercial_change_4w": "Commercial Δ4W",
+        "commercial_change_8w": "Commercial Δ8W",
+        "commercial_change_4w_percentile": "Commercial Δ4W Perzentil",
+        "commercial_acceleration_4w": "Commercial 4W-Beschleunigung",
+        "retail_net": "Retail Netto",
+        "retail_change_1w": "Retail Δ1W",
+        "retail_change_4w": "Retail Δ4W",
+        "retail_change_8w": "Retail Δ8W",
+        "noncommercial_net": "Non-Commercial Netto",
+        "noncommercial_net_percentile": "NC Netto-Perzentil",
+        "noncommercial_change_1w": "NC Δ1W",
+        "noncommercial_change_4w": "NC Δ4W",
+        "noncommercial_change_8w": "NC Δ8W",
+        "noncommercial_change_4w_percentile": "NC Δ4W Perzentil",
+        "open_interest_all": "Open Interest",
+        "open_interest_change_4w": "OI Δ4W",
+        "open_interest_change_4w_pct": "OI Δ4W %",
+        "open_interest_change_4w_percentile": "OI Δ4W Perzentil",
+    })
+    st.dataframe(
+        velocity_table.style.format({
+            "Commercial Netto": "{:,.0f}",
+            "Commercial Δ1W": "{:,.0f}",
+            "Commercial Δ4W": "{:,.0f}",
+            "Commercial Δ8W": "{:,.0f}",
+            "Commercial Δ4W Perzentil": "{:.1f}",
+            "Commercial 4W-Beschleunigung": "{:,.0f}",
+            "Retail Netto": "{:,.0f}",
+            "Retail Δ1W": "{:,.0f}",
+            "Retail Δ4W": "{:,.0f}",
+            "Retail Δ8W": "{:,.0f}",
+            "Non-Commercial Netto": "{:,.0f}",
+            "NC Netto-Perzentil": "{:.1f}",
+            "NC Δ1W": "{:,.0f}",
+            "NC Δ4W": "{:,.0f}",
+            "NC Δ8W": "{:,.0f}",
+            "NC Δ4W Perzentil": "{:.1f}",
+            "Open Interest": "{:,.0f}",
+            "OI Δ4W": "{:,.0f}",
+            "OI Δ4W %": "{:.2f}%",
+            "OI Δ4W Perzentil": "{:.1f}",
+        }, na_rep="—"),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.markdown("#### Open-Interest-Kontext")
+    oi1, oi2, oi3 = st.columns(3)
+    with oi1:
+        metric_card("OPEN INTEREST", f"{latest['open_interest_all']:,.0f}", "aktuelle Kontrakte")
+    with oi2:
+        metric_card(
+            "OI Δ 4W",
+            f"{oi_change_4w:+,.0f}",
+            f"{oi_change_4w_pct:+.2f}% über vier Wochen",
+        )
+    with oi3:
+        metric_card(
+            "OI Δ4W PERZENTIL",
+            f"{oi_change_4w_percentile:.1f}",
+            f"vs. {validation_weeks}W Historie · nur beschreibend",
+        )
+
+    st.markdown("#### Jüngste Reports")
+    table = cot[[
+        "report_date",
+        "commercial_long",
+        "commercial_short",
+        "commercial_net",
+        "commercial_index",
+        "commercial_net_percentile",
+        "commercial_net_oi_percentile",
+        "retail_long",
+        "retail_short",
+        "retail_net",
+        "retail_index",
+        "retail_net_percentile",
+        "retail_net_oi_percentile",
+        "noncommercial_long",
+        "noncommercial_short",
+        "noncommercial_net",
+        "noncommercial_net_percentile",
+        "noncommercial_change_4w",
+        "noncommercial_change_4w_percentile",
+        "open_interest_all",
+        "open_interest_change_4w",
+        "open_interest_change_4w_pct",
+        "open_interest_change_4w_percentile",
+    ]].tail(30).sort_values("report_date", ascending=False)
+
+    table = table.rename(columns={
+        "report_date": "COT-Datum",
+        "commercial_long": "Commercial Long",
+        "commercial_short": "Commercial Short",
+        "commercial_net": "Commercial Netto",
+        "commercial_index": "Commercial COT-Index",
+        "commercial_net_percentile": "Commercial Netto-Perzentil",
+        "commercial_net_oi_percentile": "Commercial Netto/OI Perzentil",
+        "retail_long": "Retail Long",
+        "retail_short": "Retail Short",
+        "retail_net": "Retail Netto",
+        "retail_index": "Retail COT-Index",
+        "retail_net_percentile": "Retail Netto-Perzentil",
+        "retail_net_oi_percentile": "Retail Netto/OI Perzentil",
+        "noncommercial_long": "Non-Commercial Long",
+        "noncommercial_short": "Non-Commercial Short",
+        "noncommercial_net": "Non-Commercial Netto",
+        "noncommercial_net_percentile": "NC Netto-Perzentil",
+        "noncommercial_change_4w": "NC Δ4W",
+        "noncommercial_change_4w_percentile": "NC Δ4W Perzentil",
+        "open_interest_all": "Open Interest",
+        "open_interest_change_4w": "OI Δ4W",
+        "open_interest_change_4w_pct": "OI Δ4W %",
+        "open_interest_change_4w_percentile": "OI Δ4W Perzentil",
+    })
+
+    st.dataframe(
+        table.style.format({
+            "Commercial COT-Index": "{:.1f}",
+            "Retail COT-Index": "{:.1f}",
+            "Commercial Netto-Perzentil": "{:.1f}",
+            "Retail Netto-Perzentil": "{:.1f}",
+            "Commercial Netto/OI Perzentil": "{:.1f}",
+            "Retail Netto/OI Perzentil": "{:.1f}",
+            "Commercial Long-Positionen": "{:,.0f}",
+            "Commercial Short-Positionen": "{:,.0f}",
+            "Commercial Netto": "{:,.0f}",
+            "Retail Long-Positionen": "{:,.0f}",
+            "Retail Short-Positionen": "{:,.0f}",
+            "Retail Netto": "{:,.0f}",
+            "Non-Commercial Long-Positionen": "{:,.0f}",
+            "Non-Commercial Short-Positionen": "{:,.0f}",
+            "Non-Commercial Netto": "{:,.0f}",
+            "NC Netto-Perzentil": "{:.1f}",
+            "NC Δ4W": "{:,.0f}",
+            "NC Δ4W Perzentil": "{:.1f}",
+            "Open Interest": "{:,.0f}",
+            "OI Δ4W": "{:,.0f}",
+            "OI Δ4W %": "{:.2f}%",
+            "OI Δ4W Perzentil": "{:.1f}",
+        }, na_rep="—"),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+with tab3:
+    st.markdown("### Hedger-Zyklus · Eintritt, Persistenz, Release")
+    st.caption(
+        "Das Commercial-Extrem wird als Phase behandelt. Entscheidend ist nicht nur, "
+        "dass 80/20 erreicht wurde, sondern wie lange die Hedger dort bleiben und wann "
+        "der Index die Zone wieder verlässt."
+    )
+
+    c_left, c_right = st.columns([1.25, .75], gap="large")
+    with c_left:
+        cyc_fig = go.Figure()
+        cyc_fig.add_trace(go.Scatter(
+            x=cot["report_date"], y=cot["commercial_index"],
+            name="Commercial COT-Index", mode="lines", line=dict(width=2),
+        ))
+        cyc_fig.add_hline(y=upper, line_dash="dash", opacity=.35)
+        cyc_fig.add_hline(y=lower, line_dash="dash", opacity=.35)
+        cyc_fig.update_layout(
+            height=420, margin=dict(l=0, r=0, t=25, b=0),
+            yaxis=dict(range=[0,100], title="Commercial COT-Index"),
+            xaxis_title=None,
+        )
+        tradingview_chart(
+            cyc_fig,
+            x_values=cot["report_date"],
+            default_years=3,
+            reset_y_range=(0, 100),
+            date_axis=True,
+            uirevision=f"cycle-{market['symbol']}",
+        )
+        tradingview_plotly_chart(
+            cyc_fig,
+            config=plotly_config(),
+        )
+
+    with c_right:
+        entry_txt = "—" if cycle.get("entry_date") is None else de_date(cycle["entry_date"])
+        release_txt = "—" if cycle.get("release_date") is None else de_date(cycle["release_date"])
+        st.markdown(
+            f"""
+            <div class="signalbox">
+              <small>HEDGER-ZYKLUS</small>
+              <div class="signal signal-small">{de_status(cycle["state"])}</div>
+              <p>
+                Eintritt ins Extrem: <b>{entry_txt}</b><br>
+                Dauer des Extrems: <b>{cycle['extreme_duration']} Wochen</b><br>
+                Release-Datum: <b>{release_txt}</b><br>
+                Episoden-Extremindex: <b>{'—' if pd.isna(cycle['extreme_index']) else f"{cycle['extreme_index']:.1f}"}</b><br>
+                Episoden-Extremnetto: <b>{'—' if pd.isna(cycle['extreme_net']) else f"{cycle['extreme_net']:,.0f}"}</b>
+              </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("#### Commercial-Netto-Range und Dynamik")
+    range_fig = go.Figure()
+    range_fig.add_trace(go.Scatter(
+        x=cot["report_date"], y=cot["commercial_net"], name="Commercial Netto", mode="lines"
+    ))
+    range_fig.add_trace(go.Scatter(
+        x=cot["report_date"], y=cot["commercial_range_high"], name=f"{range_weeks}W Netto-Hoch",
+        mode="lines", line=dict(width=1, dash="dot")
+    ))
+    range_fig.add_trace(go.Scatter(
+        x=cot["report_date"], y=cot["commercial_range_low"], name=f"{range_weeks}W Netto-Tief",
+        mode="lines", line=dict(width=1, dash="dot")
+    ))
+    range_fig.update_layout(
+        height=390, margin=dict(l=0, r=0, t=25, b=0),
+        xaxis_title=None, yaxis_title="Kontrakte", legend=dict(orientation="h", y=1.08),
+    )
+    tradingview_chart(
+        range_fig,
+        x_values=cot["report_date"],
+        default_years=3,
+        date_axis=True,
+        uirevision=f"commercial-range-{market['symbol']}",
+    )
+    tradingview_plotly_chart(
+        range_fig,
+        config=plotly_config(),
+    )
+
+with tab4:
+    section_line("Stufe 5 · Spekulativer Flow", f"{spec_source}")
+    definition(
+        "Flow beschreibt, wie sich die spekulative Netto-Position relativ zum Open Interest verändert. "
+        "Eine Divergenz liegt erst vor, wenn ein ungewöhnlicher 4W-Preisimpuls und ein ungewöhnlicher "
+        "4W-Flow gegeneinander laufen und der 8W-Pfad eine negative Spearman-Korrelation zeigt."
+    )
+
+    if spec_price_audit["future_prices"] > 0:
+        st.error(
+            "Preis-/COT-Ausrichtung verletzt: Mindestens ein verwendeter Preis liegt nach dem COT-Stichtag. "
+            "Die Divergenzwerte werden nicht als gültig behandelt."
+        )
+    elif spec_price_audit["invalid"] > 0:
+        st.caption(
+            f"Preis-Audit: {spec_price_audit['valid']} von {spec_price_audit['n']} COT-Wochen haben einen "
+            "Preis aus derselben ISO-Woche und niemals nach dem Stichtag. Fehlende Wochen werden nicht interpoliert."
+        )
+    else:
+        st.caption(
+            "Preis-Audit bestanden: Für alle verfügbaren COT-Wochen stammt der verwendete Schlusskurs "
+            "aus derselben Woche und liegt nie nach dem COT-Stichtag."
+        )
+
+    flow_left, flow_right = st.columns([1.15, .85], gap="large")
+
+    with flow_left:
+        chart_frame = modern_aligned if not modern_aligned.empty else cot_with_prices
+        chart_long = f"{spec_group_key}_long" if not modern_aligned.empty else "noncommercial_long"
+        chart_short = f"{spec_group_key}_short" if not modern_aligned.empty else "noncommercial_short"
+        chart = chart_frame.copy()
+        chart["spec_net_oi_chart"] = (
+            pd.to_numeric(chart[chart_long], errors="coerce")
+            - pd.to_numeric(chart[chart_short], errors="coerce")
+        ) / pd.to_numeric(chart["open_interest_all"], errors="coerce").replace(0, np.nan)
+
+        nc_fig = go.Figure()
+        nc_fig.add_trace(go.Scatter(
+            x=chart["report_date"],
+            y=chart["cot_price"],
+            name="Preis · Dienstag/COT",
+            mode="lines",
+            line=dict(width=1.6),
+            yaxis="y",
+        ))
+        nc_fig.add_trace(go.Scatter(
+            x=chart["report_date"],
+            y=chart["spec_net_oi_chart"],
+            name=f"{spec_div.get('group_label', 'Spec')} Netto / OI",
+            mode="lines",
+            line=dict(width=2),
+            yaxis="y2",
+        ))
+        nc_fig.update_layout(
+            height=440,
+            margin=dict(l=0, r=0, t=25, b=0),
+            xaxis_title=None,
+            yaxis=dict(title="Preis"),
+            yaxis2=dict(
+                title="Netto / OI",
+                overlaying="y",
+                side="right",
+                showgrid=False,
+            ),
+            legend=dict(orientation="h", y=1.08),
+        )
+        tradingview_chart(
+            nc_fig,
+            x_values=chart["report_date"],
+            default_years=3,
+            date_axis=True,
+            uirevision=f"spec-flow-{market['symbol']}",
+        )
+        tradingview_plotly_chart(
+            nc_fig,
+            config=plotly_config(),
+        )
+
+    def _fmt_z(value):
+        return "—" if pd.isna(value) else f"{value:+.2f}"
+
+    def _fmt_rho(value):
+        return "—" if pd.isna(value) else f"{value:+.2f}"
+
+    def _fmt_strength(value):
+        return "—" if pd.isna(value) else f"{value:.2f}"
+
+    with flow_right:
+        st.markdown(
+            f"""
+            <div class="signalbox">
+              <small>SPEKULATIVER FLOW · {spec_div.get('group_label', '—')}</small>
+              <div class="signal signal-small">{de_status(spec_div.get('flow_label'))}</div>
+              <p>
+                Netto Δ4W: <b>{_fmt_contracts(spec_flow_raw)} Kontrakte</b><br>
+                Netto/OI Δ4W: <b>{'—' if pd.isna(spec_flow_oi) else f'{spec_flow_oi:+.4f}'}</b><br>
+                Flow z: <b>{_fmt_z(spec_z_flow)}</b><br>
+                Netto/OI-Level: <b>{'—' if pd.isna(spec_level_pct) else f'{spec_level_pct:.1f}. Perzentil'}</b><br><br>
+                Schenkel: <b>{de_status(spec_div.get('flow_type'))}</b><br>
+                Long Δ / Brutto: <b>{'—' if pd.isna(spec_div.get('long_change_pct', np.nan)) else f"{spec_div['long_change_pct']:+.2f}%"}</b><br>
+                Short Δ / Brutto: <b>{'—' if pd.isna(spec_div.get('short_change_pct', np.nan)) else f"{spec_div['short_change_pct']:+.2f}%"}</b>
+              </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("### Divergenz · getrennt vom Flow")
+    d1, d2, d3, d4 = st.columns(4)
+    with d1:
+        metric_card("PREIS z", _fmt_z(spec_z_price), f"4W Log-Rendite · Schwelle ±{NC_DIV_Z_THRESHOLD:.1f}")
+    with d2:
+        metric_card("FLOW z", _fmt_z(spec_z_flow), "4W Δ Netto/OI · robuste 156W-Historie")
+    with d3:
+        metric_card("SPEARMAN 8W", _fmt_rho(spec_rho), "9 exakte Wochenpunkte · negativ für Divergenz")
+    with d4:
+        strength_detail = (
+            "historisches Perzentil —"
+            if pd.isna(spec_strength_pct)
+            else f"{spec_strength_pct:.1f}. Perzentil · n={spec_strength_ref_n} frühere Divergenzen in 156W"
+        )
+        metric_card("DIVERGENZ-STÄRKE", _fmt_strength(spec_strength), strength_detail)
+
+    st.markdown(
+        f"**Aktueller Divergenzbefund: {de_status(spec_div.get('status'))}**"
+    )
+    st.caption(
+        "Bullisch: z Preis ≤ -1,0 UND z Flow ≥ +1,0 UND rho < 0. "
+        "Bärisch: Vorzeichen gespiegelt. Es wird kein Gesamtscore aus z Preis, z Flow und rho gebildet."
+    )
+
+    # Mechanische Redundanz wird direkt im selben Markt sichtbar gemacht.
+    legacy_redundancy = redundancy_metrics(
+        cot,
+        hedger_key="commercial",
+        speculative_key="noncommercial",
+        nonreportable_key="retail",
+        flow_weeks=NC_DIV_FLOW_WINDOW_W,
+    )
+    if not modern_enriched.empty:
+        modern_hedger_key = "producer" if modern_report_type == "disaggregated" else "dealer"
+        modern_redundancy = redundancy_metrics(
+            modern_enriched,
+            hedger_key=modern_hedger_key,
+            speculative_key=spec_group_key,
+            nonreportable_key="nonreportable",
+            flow_weeks=NC_DIV_FLOW_WINDOW_W,
+        )
+    else:
+        modern_redundancy = None
+
+    with st.expander("Redundanz · Commercial/Hedger vs. spekulativer Flow"):
+        rows = [{
+            "Quelle": "Legacy · Commercial vs. Non-Commercial",
+            "Pearson raw": legacy_redundancy["pearson_raw"],
+            "Pearson OI-normalisiert": legacy_redundancy["pearson_oi"],
+            "Erklärte NC-Varianz": legacy_redundancy["explained_variance"],
+            "Restvarianz": legacy_redundancy["residual_variance"],
+            "NonReportable-Anteil Restdifferenz (R²)": legacy_redundancy["nonreportable_difference_r2"],
+            "N": legacy_redundancy["n"],
+            "Einordnung": legacy_redundancy["interpretation"],
+        }]
+        if modern_redundancy is not None:
+            rows.append({
+                "Quelle": f"{modern_source_label} · {('Producer' if modern_report_type == 'disaggregated' else 'Dealer')} vs. {spec_group_label}",
+                "Pearson raw": modern_redundancy["pearson_raw"],
+                "Pearson OI-normalisiert": modern_redundancy["pearson_oi"],
+                "Erklärte NC-Varianz": modern_redundancy["explained_variance"],
+                "Restvarianz": modern_redundancy["residual_variance"],
+                "NonReportable-Anteil Restdifferenz (R²)": modern_redundancy["nonreportable_difference_r2"],
+                "N": modern_redundancy["n"],
+                "Einordnung": modern_redundancy["interpretation"],
+            })
+        red_df = pd.DataFrame(rows)
+        st.dataframe(
+            red_df.style.format({
+                "Pearson raw": "{:+.3f}",
+                "Pearson OI-normalisiert": "{:+.3f}",
+                "Erklärte NC-Varianz": "{:.1%}",
+                "Restvarianz": "{:.1%}",
+                "NonReportable-Anteil Restdifferenz (R²)": "{:.1%}",
+            }, na_rep="—"),
+            use_container_width=True,
+            hide_index=True,
+        )
+        if modern_redundancy is not None and abs(modern_redundancy.get("pearson_raw", np.nan)) > 0.85:
+            st.warning(
+                "|r| > 0,85: Hedger- und spekulativer Flow sind in diesem Markt weitgehend gekoppelt. "
+                "Sie dürfen nicht als zwei unabhängige Bestätigungen gezählt werden."
+            )
+        elif modern_redundancy is not None and abs(modern_redundancy.get("pearson_raw", np.nan)) < 0.60:
+            st.info(
+                "|r| < 0,60: Ein zusätzlicher Informationsanteil des spekulativen Flows ist strukturell plausibel."
+            )
+
+    spec_hist_frame = modern_aligned if not modern_aligned.empty else cot_with_prices
+    spec_hist_long = f"{spec_group_key}_long" if not modern_aligned.empty else "noncommercial_long"
+    spec_hist_short = f"{spec_group_key}_short" if not modern_aligned.empty else "noncommercial_short"
+    hist_divs_new = historical_divergence_events(
+        spec_hist_frame,
+        long_col=spec_hist_long,
+        short_col=spec_hist_short,
+        group_label=spec_div.get("group_label", "Spec"),
+    )
+
+    st.markdown("#### Historische neue Divergenz-Episoden")
+    if hist_divs_new.empty:
+        st.info("Keine historischen Episoden nach der neuen robusten Definition im bewertbaren Zeitraum.")
+    else:
+        display = hist_divs_new.tail(50).sort_values("event_date", ascending=False).copy()
+        display["status"] = display["status"].map(de_status)
+        display = display.rename(columns={
+            "event_date": "Ereignisdatum",
+            "group_label": "Tradergruppe",
+            "status": "Status",
+            "direction": "Richtung",
+            "r_4w": "4W Log-Rendite",
+            "d_flow_4w": "Netto/OI Δ4W",
+            "z_price": "z Preis",
+            "z_flow": "z Flow",
+            "rho": "Spearman 8W",
+            "divergence_strength": "Stärke",
+            "divergence_strength_percentile": "Stärke-%ile",
+            "divergence_strength_reference_n": "Stärke-Referenz n",
+        })
+        st.dataframe(
+            display.style.format({
+                "4W Log-Rendite": "{:+.2%}",
+                "Netto/OI Δ4W": "{:+.4f}",
+                "z Preis": "{:+.2f}",
+                "z Flow": "{:+.2f}",
+                "Spearman 8W": "{:+.2f}",
+                "Stärke": "{:.2f}",
+                "Stärke-%ile": "{:.1f}",
+            }, na_rep="—"),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with st.expander("Legacy-Definition parallel anzeigen"):
+        st.write(f"Aktuell: **{de_status(nc_div_legacy['status'])}**")
+        st.caption(
+            "Diese alte Definition bleibt nur für den strukturellen Alt-vs.-Neu-Vergleich erhalten. "
+            "Sie wird nicht mehr als primäre Stufe 5 verwendet."
+        )
+        hist_legacy = historical_nc_divergences_legacy(
+            cot_with_prices,
+            lookback_weeks=int(nc_lookback),
+            min_confirming_weeks=int(nc_min_confirming),
+            min_active_leg_weeks=min(2, int(nc_lookback)),
+            min_price_move_pct=float(nc_min_price_move),
+            min_net_change_pct=float(nc_min_net_move),
+            min_active_leg_pct=float(nc_min_active_leg),
+            active_leg_share=float(nc_active_share),
+        )
+        st.write(f"Historische Legacy-Episoden: **{len(hist_legacy)}**")
+
+    if modern_error:
+        with st.expander("Hinweis zur modernen CFTC-Serie"):
+            st.warning(
+                "Die moderne Reportserie konnte in diesem Lauf nicht geladen werden. "
+                "Stufe 5 verwendet deshalb transparent den neuen robusten Legacy-NC-Fallback."
+            )
+            st.code(modern_error)
+
+
+with tab5:
+    section_line("Stufe 6 · Saisonalität", "primär 10 Handelstage")
+    definition(
+        "Basisrate = unbedingte Positiv-Quote über alle Kalenderphasen desselben "
+        "Marktes und Horizonts. Saisonale Positiv-Quoten werden nur zusammen mit "
+        "dieser Vergleichsrate gezeigt."
+    )
+    st.markdown("### Saisonalität · statistisch kalibriert")
+    st.caption(
+        "Primäre Frage: Was geschah historisch in den nächsten 10 Handelstagen? "
+        "Die Fenster 5/10/15/20/30 Jahre dienen ausschließlich als verschachtelter "
+        "Konsistenzcheck und sind keine fünf unabhängigen Bestätigungen."
+    )
+
+    if prices.empty:
+        st.warning(
+            "Für den ausgewählten Preis-Ticker stehen keine ausreichenden Tagesdaten "
+            "für die saisonale Analyse zur Verfügung."
+        )
+    else:
+        if str(price_ticker).upper().endswith("=F"):
+            st.warning(
+                "Datenhinweis: Der Preis-Proxy ist ein Yahoo-Continuous-Future. "
+                "Rollsprünge können jedes Jahr zu ähnlichen Kalenderzeiten auftreten "
+                "und dadurch scheinbare saisonale Muster erzeugen. Die Saisonalität "
+                "ist deshalb als deskriptiver Research-Kontext zu lesen. Für belastbare "
+                "Produktionstests sollte eine rollbereinigte Futures-Reihe verwendet werden."
+            )
+
+        st.markdown("#### Hauptfrage · nächste 10 Handelstage")
+        st.markdown(
+            f"**{seasonal_state['status']}**  \n"
+            f"{seasonal_state['window_detail']}  \n"
+            f"{seasonal_state['reference_detail']}"
+        )
+
+        primary = seasonal_stats[
+            seasonal_stats["horizont_tage"] == 10
+        ].copy()
+
+        if primary.empty:
+            st.info("Keine ausreichenden historischen Stichproben für 10 Handelstage.")
+        else:
+            def _direction_text(row):
+                med = row["median_rendite"]
+                hit = row["trefferquote_positiv"]
+                base = row["basisrate_positiv"]
+                if pd.isna(med) or pd.isna(hit) or pd.isna(base):
+                    return "—"
+                if med > 0 and hit > base:
+                    return "BULLISCH ↑"
+                if med < 0 and hit < base:
+                    return "BÄRISCH ↓"
+                return "NEUTRAL ·"
+
+            primary["Richtung"] = primary.apply(_direction_text, axis=1)
+            primary["Positiv"] = (
+                primary["positive_jahre"].astype("Int64").astype(str)
+                + "/"
+                + primary["stichprobe"].astype("Int64").astype(str)
+            )
+            primary["95%-KI"] = primary.apply(
+                lambda r: (
+                    "—"
+                    if pd.isna(r["ki95_unten"]) or pd.isna(r["ki95_oben"])
+                    else f"{r['ki95_unten']:.0%}–{r['ki95_oben']:.0%}"
+                ),
+                axis=1,
+            )
+
+            primary_table = primary[[
+                "historie_jahre",
+                "Richtung",
+                "Positiv",
+                "trefferquote_positiv",
+                "ki95_unten",
+                "ki95_oben",
+                "basisrate_positiv",
+                "abstand_basisrate_pp",
+                "binomial_p",
+                "median_rendite",
+                "mittel_rendite",
+                "standardabweichung",
+                "minimum",
+                "maximum",
+            ]].copy()
+
+            primary_table = primary_table.rename(columns={
+                "historie_jahre": "Historienfenster",
+                "trefferquote_positiv": "Positiv-Quote",
+                "ki95_unten": "KI unten",
+                "ki95_oben": "KI oben",
+                "basisrate_positiv": "Markt-Basisrate",
+                "abstand_basisrate_pp": "Abstand zur Basisrate (Pp.)",
+                "binomial_p": "Exakter Binomial-p",
+                "median_rendite": "Median-Rendite",
+                "mittel_rendite": "Mittlere Rendite",
+                "standardabweichung": "Standardabweichung",
+                "minimum": "Schlechtestes Jahr",
+                "maximum": "Bestes Jahr",
+            })
+
+            st.dataframe(
+                primary_table.style.format({
+                    "Historienfenster": "{:.0f} Jahre",
+                    "Positiv-Quote": "{:.1%}",
+                    "KI unten": "{:.1%}",
+                    "KI oben": "{:.1%}",
+                    "Markt-Basisrate": "{:.1%}",
+                    "Abstand zur Basisrate (Pp.)": "{:+.1f}",
+                    "Exakter Binomial-p": "{:.3f}",
+                    "Median-Rendite": "{:+.2%}",
+                    "Mittlere Rendite": "{:+.2%}",
+                    "Standardabweichung": "{:.2%}",
+                    "Schlechtestes Jahr": "{:+.2%}",
+                    "Bestes Jahr": "{:+.2%}",
+                }, na_rep="—"),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            st.caption(
+                "Der p-Wert testet die beobachtete Positiv-Quote gegen die marktinterne "
+                "Basisrate aller Kalenderphasen desselben Horizonts. Er wird nicht als "
+                "Signifikanz-Badge verwendet. Die 95%-Intervalle sind Wilson-Intervalle. "
+                "Die Basisraten beruhen auf überlappenden Forward-Renditen; die p-Werte "
+                "sind daher explorativ und nicht als endgültiger Signifikanznachweis zu lesen."
+            )
+
+        st.markdown("#### 30-Jahre-Referenz · verschachtelte Horizonte")
+        st.caption(
+            "10 / 20 / 40 / 60 Handelstage beginnen am selben historischen Startpunkt. "
+            "Sie sind ineinander verschachtelt und dürfen nicht als vier unabhängige "
+            "Bestätigungen interpretiert werden."
+        )
+
+        reference = seasonal_stats[
+            seasonal_stats["historie_jahre"] == 30
+        ].copy()
+        if reference.empty:
+            available_year = (
+                seasonal_stats["historie_jahre"].max()
+                if not seasonal_stats.empty
+                else np.nan
+            )
+            reference = seasonal_stats[
+                seasonal_stats["historie_jahre"] == available_year
+            ].copy()
+
+        hcols = st.columns(4)
+        for col, horizon in zip(hcols, (10, 20, 40, 60)):
+            row = reference[reference["horizont_tage"] == horizon]
+            with col:
+                if row.empty:
+                    metric_card(
+                        f"{horizon} HANDELSTAGE",
+                        "—",
+                        "keine ausreichende Historie",
+                    )
+                else:
+                    r = row.iloc[0]
+                    metric_card(
+                        f"{horizon} HANDELSTAGE",
+                        f"{r['median_rendite']:+.2%}",
+                        f"{int(r['positive_jahre'])}/{int(r['stichprobe'])} positiv · "
+                        f"Basis {r['basisrate_positiv']:.0%}",
+                    )
+
+        st.markdown("#### Saisonaler Verlauf ab heute · nur Visualisierung")
+        seasonal_fig = go.Figure()
+
+        for years in seasonal_curve_windows:
+            path = seasonal_paths.get(int(years))
+            if path is None or path.empty:
+                continue
+
+            seasonal_fig.add_trace(go.Scatter(
+                x=path["handelstage_voraus"],
+                y=path["saisonale_rendite_pct"],
+                mode="lines",
+                name=f"{years} Jahre",
+            ))
+
+        seasonal_fig.add_hline(y=0, line_dash="dot", opacity=.35)
+        for h in (10, 20, 40, 60):
+            seasonal_fig.add_vline(x=h, line_dash="dot", opacity=.20)
+
+        seasonal_fig.update_layout(
+            height=430,
+            margin=dict(l=0, r=0, t=25, b=0),
+            xaxis_title="Handelstage ab heute",
+            yaxis_title="Saisonale kumulierte Tendenz (%)",
+            legend=dict(orientation="h", y=1.08),
+        )
+        tradingview_chart(
+            seasonal_fig,
+            date_axis=False,
+            uirevision=f"seasonality-{market['symbol']}",
+        )
+        tradingview_plotly_chart(
+            seasonal_fig,
+            config=plotly_config(),
+        )
+
+        st.caption(
+            f"Die Kurve verwendet – analog zur Grundidee des bereitgestellten TradingView-Indikators – "
+            f"einen IQR-Ausreißerfaktor von {seasonal_outlier_factor:.2f}. "
+            "Sie ist eine geglättete Visualisierung. Sämtliche Tabellenwerte darüber "
+            "basieren auf den unveränderten realisierten Forward-Renditen."
+        )
+
+        st.markdown("#### Methodische Einordnung")
+        st.markdown(
+            """
+            - **10 Handelstage** sind der feste primäre Saisonalitätshorizont.
+            - **5/10/15/20/30 Jahre** werden immer gemeinsam ausgewertet; die Auswahl
+              der sichtbaren Kurven verändert die Statistik nicht.
+            - Das **30-Jahre-Fenster** dient als langfristige Referenz. Kürzere Fenster
+              zeigen, ob das Muster in jüngerer Marktstruktur noch in dieselbe Richtung weist.
+            - Ein Ergebnis wie **7/10 positiv** wird nicht als robust bezeichnet. Neben
+              der Quote werden Basisrate, Konfidenzintervall und p-Wert sichtbar gemacht.
+            - Die vier Forward-Horizonte sind **Zoomstufen derselben saisonalen Phase**
+              und keine vier voneinander unabhängigen Belege.
+            - Bei Continuous-Futures kann ein kalendergebundener Rollmechanismus selbst
+              saisonal aussehen. Eine rollbereinigte Datenquelle bleibt deshalb die
+              bevorzugte Grundlage für spätere Produktionsentscheidungen.
+            """
+        )
+
+with tab6:
+    section_line("Historische Ereignisstudien", "publikationslag-korrigiert")
+    definition(
+        "Diese Seite zeigt historische Event-Renditen. Die bestehende COT-Event-"
+        "Logik berechnet zwar Trefferquoten, führt jedoch keine unbedingte "
+        "Markt-Basisrate mit. Deshalb werden diese Trefferquoten in der UI "
+        "bewusst nicht angezeigt; Median, Mittelwert und Ereigniszahl bleiben sichtbar."
+    )
+    st.markdown("### Historische Ereignisauswertung")
+    st.caption(
+        "Ein Ereignis beginnt beim Eintritt in eine neue 80/20-COT-Index-Extremphase. "
+        "Für jedes historische Ereignis wird zusätzlich geprüft, ob die damaligen "
+        "Commercial- und Retail-Netto-Positionen über den längeren historischen "
+        "Validierungszeitraum ebenfalls extrem waren."
+    )
+
+    if prices.empty:
+        st.warning(
+            f"Für den Preis-Ticker '{price_ticker}' konnten keine historischen "
+            "Preise geladen werden. Die COT-Analyse funktioniert weiterhin."
+        )
+    else:
+        event_horizons = tuple(
+            sorted(set(int(h) for h in horizons))
+        )
+
+        st.markdown("#### Hedger-Release-Auswertung")
+        release_events = historical_hedger_releases(
+            cot=cot,
+            prices=prices,
+            upper=upper,
+            lower=lower,
+            horizons=event_horizons,
+        )
+        if release_events.empty:
+            st.info("Keine auswertbaren historischen Hedger-Release-Ereignisse gefunden.")
+        else:
+            release_summary = summarize_releases(release_events, event_horizons)
+            release_summary_de = release_summary.copy()
+            if "group" in release_summary_de.columns:
+                release_summary_de["group"] = release_summary_de["group"].map(de_status)
+            release_summary_de = release_summary_de.rename(columns={
+                "group": "Gruppe",
+                "horizon": "Horizont",
+                "events": "Ereignisse",
+                "mean_return": "Mittlere Rendite",
+                "median_return": "Median-Rendite",
+            })
+            if "hit_rate" in release_summary_de.columns:
+                release_summary_de = release_summary_de.drop(columns=["hit_rate"])
+            st.dataframe(
+                release_summary_de.style.format({
+                    "Mittlere Rendite": "{:.2%}",
+                    "Median-Rendite": "{:.2%}",
+                }, na_rep="—"),
+                use_container_width=True,
+                hide_index=True,
+            )
+            rel_cols = [
+                "event_date", "publication_date", "trade_date", "release",
+                "extreme_duration", "extreme_index", "extreme_net",
+                "release_commercial_net",
+            ]
+            rel_fmt = {
+                "extreme_index": "{:.1f}",
+                "extreme_net": "{:,.0f}",
+                "release_commercial_net": "{:,.0f}",
+            }
+            for h in event_horizons:
+                rel_cols += [f"return_{h}w", f"aligned_return_{h}w"]
+                rel_fmt[f"return_{h}w"] = "{:.2%}"
+                rel_fmt[f"aligned_return_{h}w"] = "{:.2%}"
+            release_display = release_events[rel_cols].sort_values("event_date", ascending=False).copy()
+            release_display["release"] = release_display["release"].map(de_status)
+            release_display = release_display.rename(columns={
+                "event_date": "Positionsdatum",
+                "publication_date": "Veröffentlichung",
+                "trade_date": "Backtest-Start",
+                "release": "Release",
+                "extreme_duration": "Extremdauer (W)",
+                "extreme_index": "Extrem-Index",
+                "extreme_net": "Extrem-Netto",
+                "release_commercial_net": "Commercial-Netto beim Release",
+                **{f"return_{h}w": f"Rendite {h}W" for h in event_horizons},
+                **{f"aligned_return_{h}w": f"Richtungsrendite {h}W" for h in event_horizons},
+            })
+            rel_fmt_de = {
+                "Extrem-Index": "{:.1f}",
+                "Extrem-Netto": "{:,.0f}",
+                "Commercial-Netto beim Release": "{:,.0f}",
+            }
+            for h in event_horizons:
+                rel_fmt_de[f"Rendite {h}W"] = "{:.2%}"
+                rel_fmt_de[f"Richtungsrendite {h}W"] = "{:.2%}"
+            st.dataframe(
+                release_display.style.format(rel_fmt_de, na_rep="—"),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        st.markdown("#### Ursprüngliche Index-Extrem-Auswertung")
+        events = build_events(
+            cot=cot,
+            prices=prices,
+            upper=upper,
+            lower=lower,
+            validation_upper=validation_upper,
+            validation_lower=validation_lower,
+            horizons=event_horizons,
+        )
+
+        if events.empty:
+            st.info(
+                "Mit den aktuellen Schwellenwerten wurden keine "
+                "auswertbaren historischen Extrem-Ereignisse gefunden."
+            )
+        else:
+            summary = summarize_events(events, event_horizons)
+
+            st.markdown("#### Nur Index vs. netto-bestätigt")
+            summary_de = summary.copy()
+            summary_de["group"] = summary_de["group"].map(de_status)
+            summary_de = summary_de.rename(columns={
+                "group": "Gruppe",
+                "horizon": "Horizont",
+                "events": "Ereignisse",
+                "mean_return": "Mittlere Rendite",
+                "median_return": "Median-Rendite",
+            })
+            if "hit_rate" in summary_de.columns:
+                summary_de = summary_de.drop(columns=["hit_rate"])
+            st.dataframe(
+                summary_de.style.format({
+                    "Mittlere Rendite": "{:.2%}",
+                    "Median-Rendite": "{:.2%}",
+                }, na_rep="—"),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            confirmed = events[events["validation"] == "CONFIRMED"]
+            all_count = len(events)
+            confirmed_count = len(confirmed)
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                metric_card(
+                    "INDEX-EREIGNISSE",
+                    f"{all_count}",
+                    "alle 80/20-Episoden",
+                )
+            with c2:
+                metric_card(
+                    "NETTO BESTÄTIGT",
+                    f"{confirmed_count}",
+                    "beide Netto-Perzentile bestätigen",
+                )
+
+            preferred_h = 8 if 8 in event_horizons else event_horizons[-1]
+            row_all = summary[
+                (summary["group"] == "ALL INDEX SIGNALS")
+                & (summary["horizon"] == f"{preferred_h}W")
+            ]
+            row_conf = summary[
+                (summary["group"] == "NET CONFIRMED")
+                & (summary["horizon"] == f"{preferred_h}W")
+            ]
+
+            with c3:
+                value = "—"
+                if not row_all.empty and pd.notna(row_all.iloc[0]["median_return"]):
+                    value = f"{row_all.iloc[0]['median_return']:+.2%}"
+                metric_card(
+                    f"ALLE · {preferred_h}W MEDIAN",
+                    value,
+                    "richtungsbereinigte Event-Rendite",
+                )
+            with c4:
+                value = "—"
+                if not row_conf.empty and pd.notna(row_conf.iloc[0]["median_return"]):
+                    value = f"{row_conf.iloc[0]['median_return']:+.2%}"
+                metric_card(
+                    f"BESTÄTIGT · {preferred_h}W MEDIAN",
+                    value,
+                    "Index + Netto-Validierung",
+                )
+
+            event_cols = [
+                "event_date",
+                "publication_date",
+                "trade_date",
+                "signal",
+                "validation",
+                "commercial_index",
+                "retail_index",
+                "commercial_net",
+                "commercial_net_percentile",
+                "retail_net",
+                "retail_net_percentile",
+            ]
+            fmt = {
+                "commercial_index": "{:.1f}",
+                "retail_index": "{:.1f}",
+                "commercial_net": "{:,.0f}",
+                "retail_net": "{:,.0f}",
+                "commercial_net_percentile": "{:.1f}",
+                "retail_net_percentile": "{:.1f}",
+            }
+
+            for h in event_horizons:
+                event_cols += [
+                    f"return_{h}w",
+                    f"aligned_return_{h}w",
+                ]
+                fmt[f"return_{h}w"] = "{:.2%}"
+                fmt[f"aligned_return_{h}w"] = "{:.2%}"
+
+            st.markdown("#### Historische Ereignisse")
+            event_display = events[event_cols].sort_values("event_date", ascending=False).copy()
+            event_display["signal"] = event_display["signal"].map(de_status)
+            event_display["validation"] = event_display["validation"].map(de_status)
+            event_display = event_display.rename(columns={
+                "event_date": "Positionsdatum",
+                "publication_date": "Veröffentlichung",
+                "trade_date": "Backtest-Start",
+                "signal": "Signal",
+                "validation": "Validierung",
+                "commercial_index": "Commercial COT-Index",
+                "retail_index": "Retail COT-Index",
+                "commercial_net": "Commercial Netto",
+                "commercial_net_percentile": "Commercial Netto-Perzentil",
+                "retail_net": "Retail Netto",
+                "retail_net_percentile": "Retail Netto-Perzentil",
+                **{f"return_{h}w": f"Rendite {h}W" for h in event_horizons},
+                **{f"aligned_return_{h}w": f"Richtungsrendite {h}W" for h in event_horizons},
+            })
+            fmt_de = {
+                "Commercial COT-Index": "{:.1f}",
+                "Retail COT-Index": "{:.1f}",
+                "Commercial Netto": "{:,.0f}",
+                "Retail Netto": "{:,.0f}",
+                "Commercial Netto-Perzentil": "{:.1f}",
+                "Retail Netto-Perzentil": "{:.1f}",
+            }
+            for h in event_horizons:
+                fmt_de[f"Rendite {h}W"] = "{:.2%}"
+                fmt_de[f"Richtungsrendite {h}W"] = "{:.2%}"
+            st.dataframe(
+                event_display.style.format(fmt_de, na_rep="—"),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+with tab7:
+    st.markdown("### Definition des sechsstufigen Modells")
+    st.code(
+        f"""
+STUFE 1 — SCHNELLER COT-INDEX ({cot_weeks} Wochen)
+
+Bullisch:
+  Commercial COT-Index >= {upper}
+  UND Retail COT-Index <= {lower}
+
+Bärisch:
+  Commercial COT-Index <= {lower}
+  UND Retail COT-Index >= {upper}
+
+
+STUFE 2 — NETTO-POSITIONS-VALIDIERUNG ({validation_weeks} Wochen)
+
+Bullische Bestätigung:
+  Commercial Netto-Perzentil >= {validation_upper}
+  UND Retail Netto-Perzentil <= {validation_lower}
+
+Bärische Bestätigung:
+  Commercial Netto-Perzentil <= {validation_lower}
+  UND Retail Netto-Perzentil >= {validation_upper}
+
+
+Commercial Netto = Commercial Long - Commercial Short
+Retail Netto     = Non-Reportable Long - Non-Reportable Short
+        """.strip(),
+        language="text",
+    )
+
+    st.markdown("### Interpretation")
+    st.markdown(
+        f"""
+        - **BESTÄTIGT:** Index-Bias und beide Netto-Positionierungsseiten liegen
+          in den erwarteten historischen Extrembereichen.
+        - **TEILWEISE BESTÄTIGT:** Nur Commercial oder Retail bestätigt das Index-Signal.
+        - **NICHT BESTÄTIGT:** Der 80/20-Index ist extrem, die absoluten
+          Netto-Positionen sind über {validation_weeks} Wochen jedoch nicht
+          historisch extrem.
+        - Die Netto-Positionen werden zusätzlich relativ zum Open Interest
+          ausgewiesen. Diese OI-normalisierte Kennzahl dient als sekundäre
+          Kontrolle für strukturelles Wachstum oder Schrumpfen eines Futures-Marktes.
+        - Für die historische Statistik werden ausschließlich Informationen
+          verwendet, die zum jeweiligen damaligen COT-Report bereits bekannt waren.
+        """
+    )
+
+    st.markdown("### Commercial-Extrem-Range")
+    st.markdown(
+        f"""
+        Zusätzlich zum COT-Index werden das tatsächliche **{range_weeks}-Wochen-Hoch** und
+        **{range_weeks}-Wochen-Tief** der Commercial-Netto-Position gespeichert. Dadurch ist
+        sichtbar, ob ein hoher Index auch mit einer tatsächlich hohen Netto-Position einhergeht.
+        """
+    )
+
+    st.markdown("### Positionierungsdynamik")
+    st.markdown(
+        """
+        Commercial-, Retail- und Non-Commercial-Netto-Positionen werden über 1, 4 und 8 Wochen
+        differenziert. Die 4-Wochen-Veränderung wird zusätzlich historisch als Perzentil eingeordnet.
+        `4W Acceleration` vergleicht die jüngsten vier Wochen mit den vier Wochen davor.
+        """
+    )
+
+    st.markdown("### Analysehierarchie")
+    st.markdown(
+        """
+        Der Kopfbereich enthält nur noch die sechs Informationen, die zur schnellen
+        Einordnung des aktuellen Marktes benötigt werden. Retail-Details, Range-Rohwerte,
+        1W/8W-Veränderungen und Divergenzkomponenten bleiben in den Tabs.
+        Ein künstlicher aggregierter Validierungs-Bewertung wird nicht mehr verwendet.
+        """
+    )
+
+    st.markdown("### Non-Commercial-Niveau vs. Dynamik")
+    st.markdown(
+        f"""
+        Das Legacy-Non-Commercial-Level wird als rollierendes historisches
+        Netto-Perzentil über **{validation_weeks} Wochen** und zusätzlich als
+        **{cot_weeks}W-COT-Index** dargestellt. Der 156W-Wert ist die langfristigere
+        Extrem-Einordnung; der 26W-COT-Index ist die kurzfristigere Min/Max-Einordnung.
+        Die Dynamik wird davon getrennt als 4-Wochen-Veränderung und deren
+        historisches Perzentil betrachtet.
+
+        Ein extremes NC-Level beschreibt vor allem **Trend-Crowding / Positionierungsphase**.
+        Es wird nicht automatisch als Top oder Boden interpretiert. Interessanter für
+        einen möglichen Wendepunkt ist die Kombination aus extremem Level und einem
+        anschließend gegenläufig drehenden NC-Flow. Commercial und Legacy NC werden
+        dabei ausdrücklich nicht als zwei unabhängige Bestätigungen gezählt.
+        """
+    )
+
+    st.markdown("### Open Interest")
+    st.markdown(
+        f"""
+        Open Interest wird über vier Wochen verändert und ebenfalls über
+        **{validation_weeks} Wochen** historisch eingeordnet. Es dient aktuell nur als
+        Partizipationskontext und verändert den Richtungs-Bias noch nicht.
+        """
+    )
+
+    st.markdown("### Eingefrorene Produktionsparameter")
+    st.markdown(
+        f"""
+        Die reguläre Analyse arbeitet mit einer **festen Methodik**:
+
+        - COT-Index: **{COT_INDEX_WEEKS} Wochen**
+        - Index-Extremgrenzen: **{INDEX_UPPER}/{INDEX_LOWER}**
+        - Netto-Historie: **{NET_VALIDATION_WEEKS} Wochen**
+        - Netto-Perzentil-Grenzen: **{NET_UPPER_PERCENTILE}/{NET_LOWER_PERCENTILE}**
+        - Commercial-Extrem-Range: **{COMMERCIAL_RANGE_WEEKS} Wochen**
+        - Legacy-NC-Divergenz (nur Vergleich): **{NC_DIVERGENCE_WEEKS} Wochen**, mindestens **{NC_CONFIRMING_WEEKS}** bestätigende Wochen
+        - Legacy Mindest-Preisbewegung: **{NC_MIN_PRICE_MOVE_PCT:.2f}%**
+        - Legacy Mindest-NC-Netto-Veränderung: **{NC_MIN_NET_CHANGE_GROSS_PCT:.2f}%**
+        - Neue Spec-Flow-Methodik: Preis **{NC_DIV_PRICE_WINDOW_W}W**, Flow **{NC_DIV_FLOW_WINDOW_W}W**, Pfad **{NC_DIV_PATH_WINDOW_W}W**
+        - Neue robuste Historie: **{NC_DIV_STANDARDIZE_HIST_W}W** exaktes vorangehendes Kalenderfenster · z-Schwelle **{NC_DIV_Z_THRESHOLD:.1f}**
+        - OI-Normalisierung: **{NC_DIV_USE_OI_NORM}**
+        - COT-Forward-Horizonte: **{FORWARD_HORIZONS_WEEKS[0]} und {FORWARD_HORIZONS_WEEKS[1]} Wochen**
+        - Saisonaler IQR-Faktor: **{SEASONAL_OUTLIER_IQR_FACTOR:.2f}**
+
+        Auf der produktiven Marktanalyse gibt es dafür **keine Regler**.
+        Methodische Varianten werden getrennt im Research Lab untersucht, damit
+        die Produktionsparameter nicht nach einzelnen Märkten oder attraktiven
+        historischen Ergebnissen nachoptimiert werden.
+        """
+    )
+
+    st.markdown("### Bedingungs-Watchlist")
+    st.markdown(
+        f"""
+        Die Watchlist ist **keine Rangliste**. Ein Markt wird nur in die Hauptliste
+        aufgenommen, wenn drei boolesche Bedingungen gleichzeitig erfüllt sind:
+
+        1. Hedger-Zyklus befindet sich in **EXTREME** oder **RELEASE**.
+        2. Commercial- und Retail-Netto-Perzentile bestätigen die Zyklusrichtung
+           gemäß den aktuellen Schwellen **{validation_upper:.0f}/{validation_lower:.0f}**.
+        3. Commercial-Netto liegt am richtungskorrekten **{range_weeks}W-Range-Extrem**.
+
+        Die Anzahl der Einträge wird nicht auf eine feste Zielzahl aufgefüllt.
+        Korrelierte Kontrakte werden als Themen/Komplexe zusammengefasst.
+        Rohstoffe und Finanzwerte werden getrennt ausgewiesen.
+        """
+    )
+
+    st.markdown("### Saisonalität")
+    st.markdown(
+        """
+        Die Saisonalität bleibt vollständig von der COT-Logik getrennt. Der feste
+        Primärhorizont beträgt **10 Handelstage**. Die Historienfenster
+        **5/10/15/20/30 Jahre** werden immer gemeinsam berechnet, damit kein Fenster
+        nachträglich anhand des attraktivsten Ergebnisses ausgewählt werden kann.
+
+        Für jede Fensterlänge werden reale historische Forward-Renditen vom gleichen
+        Handelsjahrespunkt berechnet. Die Positiv-Quote wird mit der **marktinternen
+        Basisrate aller Kalenderphasen desselben Horizonts** verglichen.
+        """
+    )
+
+    st.code(
+        """
+Primäre Saisonfrage:
+  Was geschah historisch in den nächsten 10 Handelstagen?
+
+Konsistenz:
+  5J / 10J / 15J / 20J / 30J immer gemeinsam
+  → Richtung je Fenster
+  → Anzahl bullischer / bärischer Fenster
+  → kein "ROBUST"-Label
+
+Statistische Einordnung:
+  positive Jahre / Stichprobe
+  Markt-Basisrate aller Kalenderphasen
+  Abstand zur Basisrate in Prozentpunkten
+  exakter zweiseitiger Binomial-p-Wert
+  95%-Wilson-Konfidenzintervall
+  Median / Mittelwert / Streuung
+
+Langfristige Referenz:
+  30 Jahre
+
+Horizonte:
+  10 / 20 / 40 / 60 Handelstage
+  → verschachtelte Zoomstufen
+  → keine unabhängigen Bestätigungen
+
+Saisonkurve:
+  IQR-gefilterte Tagesbewegungen
+  → ausschließlich Visualisierung
+        """.strip(),
+        language="text",
+    )
+
+    st.warning(
+        "Continuous-Futures können kalendergebundene Rollsprünge enthalten. "
+        "Für Saisonalität ist dies ein potenzieller Bias und nicht nur gewöhnliches Rauschen. "
+        "Die aktuelle Yahoo-Reihe ist daher ein Research-Proxy; eine rollbereinigte "
+        "Futures-Reihe wäre für eine belastbare Produktionsversion vorzuziehen."
+    )
+
+    st.markdown("### Hedger-Timing")
+    st.markdown(
+        """
+        Ein Commercial-Extrem wird als **Setup** behandelt. Das erstmalige Verlassen
+        der Extremzone wird separat als **Release** markiert. Dadurch wird nicht
+        unterstellt, dass bereits das bloße Erreichen von 80/20 das Timing liefert.
+        """
+    )
+
+    st.markdown("### Spekulativer Flow & Divergenz · V3.3.2")
+    st.markdown(
+        f"""
+        Die primäre spekulative Gruppe ist **Managed Money** bei Disaggregated-Rohstoffreports
+        und **Leveraged Funds** bei TFF-Finanzreports. Legacy Non-Commercial bleibt als
+        Vergleichspfad erhalten. Die neue Methodik ist bewusst von den eingefrorenen
+        Legacy-Produktionsparametern getrennt.
+
+        Preis- und Positionsdaten werden auf den COT-Stichtag ausgerichtet: verwendet wird
+        der letzte Tages-Schlusskurs **≤ Report-Dienstag**. Ein Preis aus einer späteren
+        Sitzung ist unzulässig. Fehlt die passende COT-Woche, wird weder 4W- noch 8W-Pfad
+        stillschweigend gestreckt.
+        """
+    )
+    st.code(
+        f"""
+Preis:
+  r_4w = log(Preis_t / Preis_t-{NC_DIV_PRICE_WINDOW_W}W)
+  z_price = (r_4w - Median) / (IQR / 1.349)
+
+Flow:
+  spec_net_oi = (Long - Short) / Open Interest
+  d_flow_4w = spec_net_oi_t - spec_net_oi_t-{NC_DIV_FLOW_WINDOW_W}W
+  z_flow = robuste Standardisierung über das vorangehende {NC_DIV_STANDARDIZE_HIST_W}W-Kalenderfenster
+
+Pfad:
+  rho = Spearman(Preis, spec_net_oi) über {NC_DIV_PATH_WINDOW_W} Wochen = {NC_DIV_PATH_WINDOW_W + 1} Wochenpunkte
+
+Bullische Divergenz:
+  z_price <= -{NC_DIV_Z_THRESHOLD:.1f}
+  z_flow  >= +{NC_DIV_Z_THRESHOLD:.1f}
+  rho < 0
+
+Bärische Divergenz:
+  Vorzeichen gespiegelt
+
+Divergenz-Stärke:
+  min(|z_price|, |z_flow|) * |rho|
+  plus historisches Stärke-Perzentil
+
+Kein Look-ahead:
+  Der aktuelle Wert t ist niemals Teil seiner eigenen {NC_DIV_STANDARDIZE_HIST_W}W-Referenzverteilung.
+
+Long-/Short-Schenkel:
+  bleiben als separater Befund erhalten; sie werden nicht in einen Gesamtscore eingerechnet.
+        """.strip(),
+        language="text",
+    )
+
+    with st.expander("Legacy-NC-Divergenz · nur Vergleich"):
+        st.code(
+            f"""
+Bullisch Legacy:
+  Preis {nc_lookback}W <= -{nc_min_price_move:.2f}%
+  NC-Netto / vorheriges NC-Brutto >= +{nc_min_net_move:.2f}%
+  NC-Netto steigt in mindestens {nc_min_confirming} von {nc_lookback} Wochen
+
+Bärisch Legacy:
+  Vorzeichen gespiegelt
+            """.strip(),
+            language="text",
+        )
+
+st.caption(
+    f"Aufgelöster CFTC-Kontraktcode: {code} · Preis-Proxy: {price_ticker} · Spec Flow V3.3.2"
+)

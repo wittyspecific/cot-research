@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+.streamlit/secrets.toml
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.db
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+gateway_key.txt

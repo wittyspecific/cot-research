@@ -1,0 +1,8 @@
+streamlit>=1.40,<2
+pandas>=2.2,<3
+numpy>=1.26,<3
+requests>=2.32,<3
+plotly>=5.24,<7
+yfinance>=0.2.54,<2
+MetaTrader5>=5.0.45; platform_system == "Windows"
+tomli>=2.0,<3; python_version < "3.11"
