@@ -6,6 +6,7 @@ import streamlit as st
 
 from src.fx_relative import (
     add_20y_multi_pair_seasonality,
+    add_currency_20y_multi_seasonality,
     build_all_fx_pairs,
     load_currency_cot_profiles,
 )
@@ -77,6 +78,9 @@ def render_currency_table(profiles: pd.DataFrame):
                     row["retail_net_percentile"],
                     bool(row["retail_ok"]),
                 ),
+                "Saison 20/40/60T": str(
+                    row.get("currency_seasonality_compact", "20· · 40· · 60·")
+                ),
             }
         )
 
@@ -84,6 +88,18 @@ def render_currency_table(profiles: pd.DataFrame):
         pd.DataFrame(rows),
         width="stretch",
         hide_index=True,
+        column_config={
+            "Saison 20/40/60T": st.column_config.TextColumn(
+                "Saison 20/40/60T",
+                width="medium",
+                help=(
+                    "20 abgeschlossene Jahre, gleiche Methodik wie in der Watchlist. "
+                    "▲ = saisonal bullish, ▼ = saisonal bearish, — = gemischt, · = N/V. "
+                    "Bei bullish COT unterstützt ▲; bei bearish COT unterstützt ▼. "
+                    "Die Saison verändert den COT-Score nicht."
+                ),
+            ),
+        },
     )
 
 
@@ -157,7 +173,7 @@ page_header(
     "Forex COT Matrix",
     "Relative Währungsstärke",
     "Starke COT-Währung gegen schwache COT-Währung.",
-    "V3.4.4.2 · FX 9 CURRENCIES + 4/4 HOTFIX",
+    "V3.8.1.1 · CURRENCY 20/40/60T SEASONALITY",
 )
 
 st.caption(
@@ -173,6 +189,9 @@ st.caption(
 
 with st.spinner("Währungs-COT-Daten werden geladen …"):
     profiles, errors = load_currency_cot_profiles()
+
+with st.spinner("20J / 20-40-60T Währungs-Saisonalität wird berechnet …"):
+    profiles = add_currency_20y_multi_seasonality(profiles)
 
 pairs = build_all_fx_pairs(profiles)
 
@@ -208,7 +227,12 @@ definition(
 
 section_line(
     "Währungsübersicht",
-    "COT · Commercial-Netto · Non-Commercial-Netto · Retail-Netto",
+    "COT · Commercial-Netto · Non-Commercial-Netto · Retail-Netto · Saison 20/40/60T",
+)
+st.caption(
+    "Saison: ▲ bullish · ▼ bearish · — gemischt · · N/V. "
+    "Die Pfeile zeigen die saisonale Richtung der einzelnen Währung; "
+    "sie sind Kontext und kein zusätzlicher COT-Punkt."
 )
 render_currency_table(profiles)
 

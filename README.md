@@ -1,3 +1,7 @@
+## V3.8.1.1 · Currency 20/40/60T Seasonality
+
+Die Forex-Währungsübersicht zeigt jetzt je Einzelwährung eine kompakte 20J-Saisonalität über 20/40/60 Handelstage (`20▲ · 40▼ · 60—`). Die Berechnung nutzt dieselbe Richtungslogik wie die Watchlist und die dort hinterlegten Währungs-Preisproxies. Die Saison bleibt separater Kontext und verändert den COT-Score 1/4–4/4 nicht.
+
 ## V3.8.1 · TradingView Preview
 
 Neu in dieser Version: Der Trade Planner und das Trading Journal können einen offiziellen TradingView Advanced Chart als visuelle Analyseoberfläche einblenden. TradingView bleibt bewusst vom MT5-Outcome-System getrennt; Entry/SL/TP, Prop-Desk und Outcome-Tracking verwenden weiterhin die Broker-/MT5-Daten.

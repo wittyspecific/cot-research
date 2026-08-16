@@ -348,3 +348,43 @@ def summarize_fx_horizons(results: dict[int, dict]) -> dict:
     elif all(v==1 for v in valid): rank=1; overall='GEGENLÄUFIG'
     else: rank=2; overall='GEMISCHT'
     return {'compact':' · '.join(compact),'overall':overall,'overall_rank':rank,'detail':' | '.join(details)}
+
+def summarize_currency_horizons(results: dict[int, dict]) -> dict:
+    """Compact 20/40/60T directional view for a single currency.
+
+    The arrows show the seasonal direction itself, not a new COT score:
+      ▲ bullish seasonality
+      ▼ bearish seasonality
+      — mixed / no clear seasonal direction
+      · insufficient history
+
+    ``supported_horizons`` is kept separately for research/UI context.
+    """
+    compact = []
+    details = []
+    valid_horizons = 0
+    supported_horizons = 0
+
+    for horizon in (20, 40, 60):
+        result = results.get(horizon, {})
+        support = str(result.get("support", "N/V"))
+
+        if support == "N/V":
+            mark = "·"
+        else:
+            valid_horizons += 1
+            direction = int(result.get("seasonal_direction", 0) or 0)
+            mark = "▲" if direction > 0 else "▼" if direction < 0 else "—"
+            if support == "UNTERSTÜTZT":
+                supported_horizons += 1
+
+        compact.append(f"{horizon}{mark}")
+        if result.get("detail"):
+            details.append(f"{horizon}T: {result['detail']}")
+
+    return {
+        "compact": " · ".join(compact),
+        "valid_horizons": valid_horizons,
+        "supported_horizons": supported_horizons,
+        "detail": " | ".join(details) if details else "Keine ausreichende Historie",
+    }

@@ -21,12 +21,14 @@ from .fx_relative_core import (
     FX_SEASONALITY_FORWARD_DAYS,
     FX_SEASONALITY_HISTORY_YEARS,
     summarize_fx_horizons,
+    summarize_currency_horizons,
     build_all_fx_pairs,
     classify_20y_40d_seasonality,
     currency_cot_profile,
 )
 from .markets import CLASSIC_MARKETS
 from .seasonality import forward_statistics
+from .watchlist_seasonality_core import classify_asset_seasonality
 
 
 @st.cache_data(ttl=6 * 60 * 60, show_spinner=False)
@@ -229,6 +231,132 @@ def load_currency_usd_values(
     return result
 
 
+
+
+def _currency_price_tickers() -> dict[str, str]:
+    return {
+        str(market["symbol"]): str(market.get("ticker", "") or "").strip()
+        for market in CLASSIC_MARKETS["Currencies"]
+        if str(market.get("symbol", "")) in CURRENCY_ORDER
+        and str(market.get("ticker", "") or "").strip()
+    }
+
+
+@st.cache_data(ttl=12 * 60 * 60, show_spinner=False)
+def load_currency_seasonality_prices(
+    start: str = "1990-01-01",
+) -> dict[str, pd.DataFrame]:
+    """Load the same currency price proxies used by the main watchlist.
+
+    All nine currency tickers are downloaded in one batch so the extra
+    currency-seasonality column does not create one Yahoo request per row.
+    """
+    tickers = _currency_price_tickers()
+    if not tickers:
+        return {}
+
+    try:
+        raw = yf.download(
+            tickers=list(tickers.values()),
+            start=start,
+            progress=False,
+            auto_adjust=False,
+            actions=False,
+            threads=False,
+            group_by="ticker",
+        )
+    except Exception:
+        return {}
+
+    result: dict[str, pd.DataFrame] = {}
+    for symbol, ticker in tickers.items():
+        close = _extract_close(raw, ticker)
+        if close.empty:
+            continue
+        close.index = pd.to_datetime(close.index)
+        if getattr(close.index, "tz", None) is not None:
+            close.index = close.index.tz_localize(None)
+        result[symbol] = (
+            pd.DataFrame({"close": pd.to_numeric(close, errors="coerce")})
+            .dropna()
+            .sort_index()
+        )
+
+    return result
+
+
+@st.cache_data(ttl=12 * 60 * 60, show_spinner=False)
+def add_currency_20y_multi_seasonality(
+    profiles: pd.DataFrame,
+) -> pd.DataFrame:
+    """Add a compact 20/40/60T seasonal direction to each COT currency.
+
+    Methodology is the same as the watchlist: 20 completed historical years,
+    the current trading-day position, and the project's median/base-rate
+    directional classification. Seasonality remains separate from 1/4-4/4 COT.
+    """
+    if profiles is None or profiles.empty:
+        return profiles.copy() if profiles is not None else pd.DataFrame()
+
+    price_map = load_currency_seasonality_prices()
+    output = []
+
+    for _, row in profiles.iterrows():
+        symbol = str(row["symbol"])
+        prices = price_map.get(symbol, pd.DataFrame())
+        if prices is not None and not prices.empty:
+            stats = forward_statistics(
+                prices,
+                history_windows=(FX_SEASONALITY_HISTORY_YEARS,),
+                horizons=tuple(FX_SEASONALITY_FORWARD_DAYS),
+            )
+        else:
+            stats = pd.DataFrame()
+
+        horizon_results = {}
+        for horizon in FX_SEASONALITY_FORWARD_DAYS:
+            rows = (
+                stats[
+                    (stats["historie_jahre"] == FX_SEASONALITY_HISTORY_YEARS)
+                    & (stats["horizont_tage"] == horizon)
+                ]
+                if not stats.empty
+                else pd.DataFrame()
+            )
+
+            if rows.empty:
+                horizon_results[horizon] = {
+                    "seasonal_direction": 0,
+                    "support": "N/V",
+                    "supports": False,
+                    "detail": "Keine ausreichende 20J-Währungshistorie",
+                }
+                continue
+
+            stat = rows.iloc[0]
+            seasonal = classify_asset_seasonality(
+                cot_direction=int(row["direction"]),
+                sample_size=int(stat["stichprobe"]),
+                positive_years=int(stat["positive_jahre"]),
+                positive_rate=float(stat["trefferquote_positiv"]),
+                base_rate=float(stat["basisrate_positiv"]),
+                median_return=float(stat["median_rendite"]),
+            )
+            horizon_results[horizon] = seasonal
+
+        summary = summarize_currency_horizons(horizon_results)
+        item = row.to_dict()
+        item.update({
+            "currency_seasonality_compact": summary["compact"],
+            "currency_seasonality_detail": summary["detail"],
+            "currency_seasonality_valid_horizons": summary["valid_horizons"],
+            "currency_seasonality_supported_horizons": summary["supported_horizons"],
+        })
+        output.append(item)
+
+    return pd.DataFrame(output)
+
+
 def synthesize_pair_prices(
     base: str,
     quote: str,
@@ -335,5 +463,6 @@ __all__ = [
     "build_all_fx_pairs",
     "load_currency_cot_profiles",
     "add_20y_multi_pair_seasonality",
+    "add_currency_20y_multi_seasonality",
 ]
 
