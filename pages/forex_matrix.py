@@ -65,9 +65,9 @@ def render_currency_table(profiles: pd.DataFrame):
                     f"· {row['symbol']}"
                 ),
                 "State": str(row.get("state_label", "—")),
+                "Transition": str(row.get("transition_state", "—")),
                 "Signal": currency_bias_display(row),
-                "COT Index": f"{float(row['commercial_index']):.1f}" if pd.notna(row.get("commercial_index")) else "—",
-                "Commercial": value_text(
+                "Commercial 156W": value_text(
                     row["commercial_net_percentile"],
                     bool(row["commercial_ok"]),
                 ),
@@ -174,7 +174,7 @@ page_header(
     "Research · Forex",
     "Relative Währungsstärke",
     "Hedge-Release-Signale der Einzelwährungen werden zu Paaren kombiniert.",
-    "V3.9.0 · RELEASE-BASED FX",
+    "V3.10.0 · 156W RELEASE CONTEXT",
 )
 
 st.caption(
@@ -221,12 +221,14 @@ context_strip(
 )
 
 definition(
-    "State ≠ Signal: Ein COT-Extrem erzeugt noch keine Währungsrichtung. Erst ein aktives Hedge-Release wird als +/− COT-Stärke gezählt. Commercial-, Non-Commercial- und Retail-Netto können dieses Release bis 4/4 bestätigen. Paarbias = Signalstärke Basis minus Gegenwährung; Saison bleibt separat."
+    "Commercial Net Percentile 156W ist das Primärmaß der Währungspositionierung. Ein 156W-Extrem erzeugt "
+    "noch keine Richtung; erst das Verlassen der Extremzone aktiviert das Hedge-Release. Transition, aktuelles "
+    "156W-Perzentil, NC und Retail bleiben sichtbar. Der 26W-COT-Index wird nur noch im Advanced Research geführt."
 )
 
 section_line(
     "Währungsübersicht",
-    "Hedge-State · Release-Signal · Netto-Bestätigung · Saison",
+    "156W-State · Transition · Release · Bestätigung · Saison",
 )
 st.caption(
     "Saison: ▲ bullish · ▼ bearish · — gemischt · · N/V. "
@@ -241,7 +243,7 @@ section_line(
 )
 
 st.caption(
-    "Nur aktive Releases tragen Richtung. FULL HEDGE ohne Release bleibt neutral und erzeugt keinen Paarbias."
+    "Nur bestätigte Releases aus dem Commercial-156W-Zyklus tragen Richtung. FULL/LOW HEDGE ohne Release bleibt neutral."
 )
 
 only_supported = st.toggle(

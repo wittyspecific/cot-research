@@ -57,7 +57,6 @@ def load_currency_cot_profiles() -> tuple[pd.DataFrame, pd.DataFrame]:
 
             valid = cot.dropna(
                 subset=[
-                    "commercial_index",
                     "commercial_net_percentile",
                     "noncommercial_net_percentile",
                     "retail_net_percentile",
@@ -71,8 +70,8 @@ def load_currency_cot_profiles() -> tuple[pd.DataFrame, pd.DataFrame]:
             latest = valid.iloc[-1]
             cycle = hedger_cycle_state(
                 cot,
-                upper=INDEX_UPPER,
-                lower=INDEX_LOWER,
+                upper=NET_UPPER_PERCENTILE,
+                lower=NET_LOWER_PERCENTILE,
             )
             profile = currency_cot_profile(
                 symbol=market["symbol"],
@@ -90,6 +89,10 @@ def load_currency_cot_profiles() -> tuple[pd.DataFrame, pd.DataFrame]:
                 cycle_direction=int(cycle.get("direction", 0) or 0),
                 extreme_direction=int(cycle.get("extreme_direction", 0) or 0),
                 cycle_state=str(cycle.get("state", "") or ""),
+                transition_state=str(cycle.get("transition", "") or ""),
+                extreme_percentile=cycle.get("extreme_percentile", np.nan),
+                percentile_change_1w=cycle.get("percentile_change_1w", np.nan),
+                percentile_change_4w=cycle.get("percentile_change_4w", np.nan),
                 index_upper=INDEX_UPPER,
                 index_lower=INDEX_LOWER,
                 net_upper=NET_UPPER_PERCENTILE,
@@ -474,4 +477,3 @@ __all__ = [
     "add_20y_multi_pair_seasonality",
     "add_currency_20y_multi_seasonality",
 ]
-

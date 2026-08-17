@@ -135,8 +135,10 @@ def _validation_failure_reasons(
     direction: int,
     validation_upper: float,
     validation_lower: float,
+    cycle: dict | None = None,
 ) -> list[str]:
-    comm = float(row.get("commercial_net_percentile", np.nan))
+    cycle = dict(cycle or {})
+    comm = float(cycle.get("extreme_percentile", row.get("commercial_net_percentile", np.nan)))
     retail = float(row.get("retail_net_percentile", np.nan))
     reasons = []
 
@@ -206,9 +208,9 @@ def scan_classic_markets(
     The primary candidate list is intentionally condition-based rather than
     ranked. A market qualifies only when all three gates are true:
 
-    1) Hedger cycle phase is EXTREME or RELEASE
-    2) Commercial + Retail net percentiles confirm the cycle direction
-    3) Commercial net is at/near the directionally correct range extreme
+    1) Commercial Net 156W Percentile enters/leaves an extreme
+    2) A directional signal exists only after the 156W extreme RELEASE
+    3) Retail/NC/flow remain confirmation/context; 26W index/range are secondary
 
     No prices are loaded here. NC divergence and seasonality remain detail-view
     calculations.
@@ -240,8 +242,6 @@ def scan_classic_markets(
                 )
 
                 valid = cot.dropna(subset=[
-                    "commercial_index",
-                    "retail_index",
                     "commercial_net_percentile",
                     "noncommercial_net_percentile",
                     "retail_net_percentile",
@@ -257,8 +257,8 @@ def scan_classic_markets(
 
                 cycle = hedger_cycle_state(
                     cot,
-                    upper=upper,
-                    lower=lower,
+                    upper=validation_upper,
+                    lower=validation_lower,
                     release_active_weeks=int(release_active_weeks),
                 )
                 signal_direction = int(cycle.get("direction", 0) or 0)
@@ -286,6 +286,7 @@ def scan_classic_markets(
                     _direction_label(validation_direction),
                     upper=validation_upper,
                     lower=validation_lower,
+                    cycle=cycle,
                 )
 
                 range_state = commercial_range_state(latest)
@@ -307,9 +308,10 @@ def scan_classic_markets(
                     and expected_range is not None
                     and range_state["state"] == expected_range
                 )
-                # A current extreme is only a watch-state. A directional candidate
-                # exists after the hedge RELEASE has occurred.
-                qualifies = bool(signal_active and validation_ok and range_ok)
+                # V3.10.0: the 156W Commercial state/release engine is primary.
+                # The old 26W range/index context remains descriptive and no longer
+                # gates an otherwise valid release candidate.
+                qualifies = bool(signal_active and validation_ok)
 
                 failed = []
                 if not active_cycle:
@@ -321,15 +323,11 @@ def scan_classic_markets(
                             validation_direction,
                             validation_upper,
                             validation_lower,
+                            cycle=cycle,
                         )
                     )
-                if active_cycle and not range_ok:
-                    failed.append(
-                        "Range: " + _range_failure_reason(
-                            range_state,
-                            validation_direction,
-                        )
-                    )
+                # Range remains visible as secondary context, but is no longer
+                # a V3.10.0 qualification gate.
 
                 velocity_pct = float(latest["commercial_change_4w_percentile"])
                 change_4w = float(latest["commercial_change_4w"])
@@ -355,8 +353,14 @@ def scan_classic_markets(
                     "signal_active": bool(signal_active),
                     "extreme_duration": int(cycle.get("extreme_duration", 0) or 0),
                     "weeks_since_release": cycle.get("weeks_since_release", np.nan),
+                    "extreme_percentile": cycle.get("extreme_percentile", np.nan),
                     "extreme_index": cycle.get("extreme_index", np.nan),
                     "extreme_net": cycle.get("extreme_net", np.nan),
+                    "transition_state": cycle.get("transition", "—"),
+                    "commercial_percentile_change_1w": cycle.get("percentile_change_1w", np.nan),
+                    "commercial_percentile_change_2w": cycle.get("percentile_change_2w", np.nan),
+                    "commercial_percentile_change_4w": cycle.get("percentile_change_4w", np.nan),
+                    "commercial_percentile_distance_from_extreme": cycle.get("distance_from_extreme", np.nan),
 
                     "commercial_index": float(latest["commercial_index"]),
                     "retail_index": float(latest["retail_index"]),

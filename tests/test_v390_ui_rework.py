@@ -6,11 +6,13 @@ from src.analysis import current_signal, hedger_cycle_state
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _cot(indexes):
+def _cot(percentiles, indexes=None):
+    indexes = indexes if indexes is not None else [50] * len(percentiles)
     return pd.DataFrame({
-        "report_date": pd.date_range("2026-01-01", periods=len(indexes), freq="7D"),
+        "report_date": pd.date_range("2026-01-01", periods=len(percentiles), freq="7D"),
+        "commercial_net_percentile": percentiles,
         "commercial_index": indexes,
-        "commercial_net": [100 + i for i in range(len(indexes))],
+        "commercial_net": [100 + i for i in range(len(percentiles))],
     })
 
 
@@ -35,14 +37,14 @@ def test_light_minimal_theme_and_dashboard_are_present():
     assert '"bg": "#F6F8FB"' in style
     assert '"accent": "#16A34A"' in style
     assert 'pages/dashboard.py' in app
-    assert 'V3.9.0' in app
+    assert 'V3.10.0' in app
 
 
 def test_watchlist_explains_state_not_signal():
     text = (ROOT / "pages/watchlist.py").read_text()
-    assert "COT 100 bedeutet FULL HEDGE" in text
-    assert "BULLISH RELEASE" in text
-    assert "WAITING FOR RELEASE" in text
+    assert "Commercial Net Percentile 156W ist die Ausgangslage" in text
+    assert "Cross-Group Shift" in text
+    assert "CONTEXT READY ist noch kein Trade" in text
 
 
 def test_extreme_without_release_is_not_directional_signal():

@@ -55,6 +55,16 @@ def enrich_cot(
     out["commercial_net_percentile"] = rolling_percentile(
         out["commercial_net"], validation_weeks
     )
+    # V3.10.0 primary Commercial state/transition features.  The 156W percentile
+    # is the state variable; its own changes describe how that state evolves.
+    out["commercial_net_percentile_change_1w"] = out["commercial_net_percentile"].diff(1)
+    out["commercial_net_percentile_change_2w"] = out["commercial_net_percentile"].diff(2)
+    out["commercial_net_percentile_change_4w"] = out["commercial_net_percentile"].diff(4)
+    out["commercial_net_percentile_change_8w"] = out["commercial_net_percentile"].diff(8)
+    out["commercial_net_percentile_acceleration_4w"] = (
+        2.0 * out["commercial_net_percentile_change_4w"]
+        - out["commercial_net_percentile_change_8w"]
+    )
     out["retail_net_percentile"] = rolling_percentile(
         out["retail_net"], validation_weeks
     )
@@ -147,11 +157,22 @@ def net_validation(
     signal: str,
     upper: float = 80,
     lower: float = 20,
+    *,
+    cycle: dict | None = None,
 ) -> dict:
+    """Confirm a 156W Commercial cycle with independent Retail positioning.
+
+    On a RELEASE the *current* Commercial percentile is already outside the
+    extreme by definition.  Commercial confirmation therefore refers to the
+    preceding extreme episode captured by ``cycle['extreme_percentile']``.
+    """
     comm = row.get("commercial_net_percentile", np.nan)
     retail = row.get("retail_net_percentile", np.nan)
+    cycle = dict(cycle or {})
+    extreme_pct = cycle.get("extreme_percentile", np.nan)
+    extreme_direction = int(cycle.get("extreme_direction", 0) or 0)
 
-    if signal == "NEUTRAL" or not np.isfinite(comm) or not np.isfinite(retail):
+    if signal == "NEUTRAL" or not np.isfinite(retail):
         return {
             "status": "NO CONFIRMATION",
             "commercial_confirmed": False,
@@ -159,11 +180,17 @@ def net_validation(
         }
 
     if signal == "BULLISH":
-        commercial_confirmed = comm >= upper
-        retail_confirmed = retail <= lower
+        commercial_confirmed = bool(
+            (extreme_direction == 1 and np.isfinite(extreme_pct) and float(extreme_pct) >= upper)
+            or (not cycle and np.isfinite(comm) and float(comm) >= upper)
+        )
+        retail_confirmed = bool(float(retail) <= lower)
     else:
-        commercial_confirmed = comm <= lower
-        retail_confirmed = retail >= upper
+        commercial_confirmed = bool(
+            (extreme_direction == -1 and np.isfinite(extreme_pct) and float(extreme_pct) <= lower)
+            or (not cycle and np.isfinite(comm) and float(comm) <= lower)
+        )
+        retail_confirmed = bool(float(retail) >= upper)
 
     if commercial_confirmed and retail_confirmed:
         status = "CONFIRMED"
@@ -174,8 +201,8 @@ def net_validation(
 
     return {
         "status": status,
-        "commercial_confirmed": bool(commercial_confirmed),
-        "retail_confirmed": bool(retail_confirmed),
+        "commercial_confirmed": commercial_confirmed,
+        "retail_confirmed": retail_confirmed,
     }
 
 
@@ -261,20 +288,40 @@ def hedger_cycle_state(
     lower: float = 20,
     release_active_weeks: int = 6,
 ) -> dict:
-    """Track entering, persistence, and release of Commercial COT extremes."""
-    valid = cot.dropna(subset=["commercial_index", "commercial_net"]).copy().reset_index(drop=True)
+    """Track the Commercial 156W percentile state, transition, and release.
+
+    V3.10.0 deliberately uses ``commercial_net_percentile`` as the primary
+    Commercial positioning state.  The legacy 26W COT index remains available
+    elsewhere as descriptive/advanced research, but it no longer decides whether
+    a hedge cycle is extreme or has released.
+
+    Semantics are unchanged from the trader's hedge interpretation:
+      * upper 156W extreme -> FULL HEDGE state, no directional signal;
+      * leaving that upper extreme -> BULLISH RELEASE;
+      * lower 156W extreme -> LOW HEDGE state, no directional signal;
+      * leaving that lower extreme -> BEARISH RELEASE.
+    """
+    required = ["commercial_net_percentile", "commercial_net"]
+    valid = cot.dropna(subset=required).copy().reset_index(drop=True)
     if len(valid) < 2:
         return {
             "state": "NO CYCLE DATA", "direction": 0, "extreme_direction": 0, "phase": "NONE",
-            "extreme_duration": 0, "weeks_since_release": np.nan,
-            "extreme_index": np.nan, "extreme_net": np.nan,
+            "transition": "NO DATA", "extreme_duration": 0, "weeks_since_release": np.nan,
+            "extreme_percentile": np.nan, "extreme_index": np.nan, "extreme_net": np.nan,
+            "current_percentile": np.nan, "percentile_change_1w": np.nan,
+            "percentile_change_2w": np.nan, "percentile_change_4w": np.nan, "distance_from_extreme": np.nan,
             "entry_date": None, "release_date": None,
+            "source_metric": "commercial_net_percentile_156w",
         }
 
-    idx = valid["commercial_index"].to_numpy(dtype=float)
-    zones = np.where(idx >= upper, 1, np.where(idx <= lower, -1, 0))
+    pct = valid["commercial_net_percentile"].to_numpy(dtype=float)
+    zones = np.where(pct >= upper, 1, np.where(pct <= lower, -1, 0))
     last = len(valid) - 1
     current_zone = int(zones[last])
+    current_pct = float(pct[last])
+    delta_1w = float(current_pct - pct[last - 1]) if last >= 1 else np.nan
+    delta_2w = float(current_pct - pct[last - 2]) if last >= 2 else np.nan
+    delta_4w = float(current_pct - pct[last - 4]) if last >= 4 else np.nan
 
     def episode(start_end_index: int, zone: int):
         end = start_end_index
@@ -283,38 +330,59 @@ def hedger_cycle_state(
             start -= 1
         ep = valid.iloc[start:end + 1]
         if zone == 1:
-            extreme_index = float(ep["commercial_index"].max())
+            extreme_pct = float(ep["commercial_net_percentile"].max())
             extreme_net = float(ep["commercial_net"].max())
         else:
-            extreme_index = float(ep["commercial_index"].min())
+            extreme_pct = float(ep["commercial_net_percentile"].min())
             extreme_net = float(ep["commercial_net"].min())
-        return start, end, ep, extreme_index, extreme_net
+        if "commercial_index" in ep.columns and ep["commercial_index"].notna().any():
+            extreme_idx = float(ep["commercial_index"].max() if zone == 1 else ep["commercial_index"].min())
+        else:
+            extreme_idx = np.nan
+        return start, end, ep, extreme_pct, extreme_idx, extreme_net
+
+    def transition_label(zone: int, d1: float, d4: float) -> str:
+        toward = (zone == 1 and ((np.isfinite(d1) and d1 < 0) or (np.isfinite(d4) and d4 < 0))) or (
+            zone == -1 and ((np.isfinite(d1) and d1 > 0) or (np.isfinite(d4) and d4 > 0))
+        )
+        away = (zone == 1 and ((np.isfinite(d1) and d1 > 0) or (np.isfinite(d4) and d4 > 0))) or (
+            zone == -1 and ((np.isfinite(d1) and d1 < 0) or (np.isfinite(d4) and d4 < 0))
+        )
+        if toward:
+            return "EARLY RELEASE · STILL EXTREME"
+        if away:
+            return "HEDGE DEEPENING"
+        return "HEDGE STABLE"
 
     if current_zone != 0:
-        start, end, ep, extreme_index, extreme_net = episode(last, current_zone)
+        start, end, ep, extreme_pct, extreme_idx, extreme_net = episode(last, current_zone)
         duration = len(ep)
-        # V3.9.0 semantics: an extreme is a POSITIONING STATE, not a directional signal.
-        # A high Commercial COT index is FULL HEDGE. Bullish/bearish direction only
-        # becomes active once the hedgers RELEASE the corresponding extreme.
-        if current_zone == 1:
-            phase = "FULL HEDGE · UPPER EXTREME" if duration == 1 else "FULL HEDGE · PERSISTENCE"
-        else:
-            phase = "LOW HEDGE · LOWER EXTREME" if duration == 1 else "LOW HEDGE · PERSISTENCE"
+        state = "FULL HEDGE" if current_zone == 1 else "LOW HEDGE"
+        if duration > 1:
+            state += " · PERSISTENCE"
+        transition = transition_label(current_zone, delta_1w, delta_4w)
         return {
-            "state": phase,
+            "state": state,
             "phase": "EXTREME",
+            "transition": transition,
             "direction": 0,
             "extreme_direction": current_zone,
             "extreme_duration": int(duration),
             "weeks_since_release": np.nan,
-            "extreme_index": extreme_index,
+            "extreme_percentile": extreme_pct,
+            "extreme_index": extreme_idx,
             "extreme_net": extreme_net,
+            "current_percentile": current_pct,
+            "percentile_change_1w": delta_1w,
+            "percentile_change_2w": delta_2w,
+            "percentile_change_4w": delta_4w,
+            "distance_from_extreme": float(current_pct - extreme_pct),
             "entry_date": valid.iloc[start]["report_date"],
             "release_date": None,
             "current_net_distance": float(valid.iloc[-1]["commercial_net"] - extreme_net),
+            "source_metric": "commercial_net_percentile_156w",
         }
 
-    # Current row is outside extremes. Find the most recent completed extreme episode.
     last_extreme = None
     for j in range(last - 1, -1, -1):
         if int(zones[j]) != 0:
@@ -323,14 +391,18 @@ def hedger_cycle_state(
 
     if last_extreme is None:
         return {
-            "state": "NO ACTIVE CYCLE", "phase": "NONE", "direction": 0, "extreme_direction": 0,
-            "extreme_duration": 0, "weeks_since_release": np.nan,
+            "state": "NO ACTIVE CYCLE", "phase": "NONE", "transition": "NORMAL",
+            "direction": 0, "extreme_direction": 0, "extreme_duration": 0,
+            "weeks_since_release": np.nan, "extreme_percentile": np.nan,
             "extreme_index": np.nan, "extreme_net": np.nan,
+            "current_percentile": current_pct, "percentile_change_1w": delta_1w,
+            "percentile_change_2w": delta_2w, "percentile_change_4w": delta_4w, "distance_from_extreme": np.nan,
             "entry_date": None, "release_date": None,
+            "source_metric": "commercial_net_percentile_156w",
         }
 
     z = int(zones[last_extreme])
-    start, end, ep, extreme_index, extreme_net = episode(last_extreme, z)
+    start, end, ep, extreme_pct, extreme_idx, extreme_net = episode(last_extreme, z)
     weeks_since_release = last - end - 1
     release_date = valid.iloc[end + 1]["report_date"] if end + 1 <= last else None
 
@@ -341,25 +413,34 @@ def hedger_cycle_state(
             state = "BEARISH RELEASE" if weeks_since_release == 0 else "BEARISH RELEASE · ACTIVE"
         direction = z
         phase = "RELEASE"
+        transition = "CONFIRMED RELEASE"
     else:
         state = "POST-RELEASE / NO ACTIVE CYCLE"
         direction = 0
         phase = "POST-RELEASE"
+        transition = "NORMALIZED"
 
     return {
         "state": state,
         "phase": phase,
+        "transition": transition,
         "direction": direction,
         "extreme_direction": z,
         "extreme_duration": int(len(ep)),
         "weeks_since_release": int(weeks_since_release),
-        "extreme_index": extreme_index,
+        "extreme_percentile": extreme_pct,
+        "extreme_index": extreme_idx,
         "extreme_net": extreme_net,
+        "current_percentile": current_pct,
+        "percentile_change_1w": delta_1w,
+        "percentile_change_2w": delta_2w,
+        "percentile_change_4w": delta_4w,
+        "distance_from_extreme": float(current_pct - extreme_pct),
         "entry_date": valid.iloc[start]["report_date"],
         "release_date": release_date,
         "current_net_distance": float(valid.iloc[-1]["commercial_net"] - extreme_net),
+        "source_metric": "commercial_net_percentile_156w",
     }
-
 
 def hedger_release_state(
     cot: pd.DataFrame,
@@ -385,8 +466,8 @@ def historical_hedger_releases(
     lower: float = 20,
     horizons=(4, 8),
 ) -> pd.DataFrame:
-    """Event study starting on the first COT report after Commercials leave an extreme."""
-    x = cot.dropna(subset=["commercial_index", "commercial_net"]).copy().reset_index(drop=True)
+    """Event study for Commercial Net Percentile 156W hedge releases."""
+    x = cot.dropna(subset=["commercial_net_percentile", "commercial_net"]).copy().reset_index(drop=True)
     if len(x) < 2 or prices.empty:
         return pd.DataFrame()
 
@@ -406,8 +487,8 @@ def historical_hedger_releases(
 
     rows = []
     for i in range(1, len(x)):
-        prev_i = float(x.iloc[i-1]["commercial_index"])
-        cur_i = float(x.iloc[i]["commercial_index"])
+        prev_i = float(x.iloc[i-1]["commercial_net_percentile"])
+        cur_i = float(x.iloc[i]["commercial_net_percentile"])
         if prev_i >= upper and cur_i < upper:
             direction, state = 1, "BULLISH RELEASE"
         elif prev_i <= lower and cur_i > lower:
@@ -419,11 +500,12 @@ def historical_hedger_releases(
         zone_test = (lambda v: v >= upper) if direction == 1 else (lambda v: v <= lower)
         j = i - 1
         start = j
-        while start > 0 and zone_test(float(x.iloc[start-1]["commercial_index"])):
+        while start > 0 and zone_test(float(x.iloc[start-1]["commercial_net_percentile"])):
             start -= 1
         ep = x.iloc[start:i]
         extreme_net = float(ep["commercial_net"].max() if direction == 1 else ep["commercial_net"].min())
-        extreme_index = float(ep["commercial_index"].max() if direction == 1 else ep["commercial_index"].min())
+        extreme_percentile = float(ep["commercial_net_percentile"].max() if direction == 1 else ep["commercial_net_percentile"].min())
+        extreme_index = float(ep["commercial_index"].max() if direction == 1 else ep["commercial_index"].min()) if "commercial_index" in ep.columns else np.nan
 
         event_date = x.iloc[i]["report_date"]
         available_date = backtest_available_date(event_date)
@@ -440,6 +522,7 @@ def historical_hedger_releases(
             "release": state,
             "direction": direction,
             "extreme_duration": int(len(ep)),
+            "extreme_percentile": extreme_percentile,
             "extreme_index": extreme_index,
             "extreme_net": extreme_net,
             "release_commercial_net": float(x.iloc[i]["commercial_net"]),
@@ -483,51 +566,41 @@ def classify_positioning_bias(
     validation_upper: float = 80,
     validation_lower: float = 20,
 ) -> dict:
-    """Classify the current Commercial positioning STATE, not a trade signal.
+    """Classify the Commercial 156W percentile positioning STATE.
 
-    V3.9.0 explicitly separates state from transition: a Commercial COT index
-    in an extreme zone is FULL/LOW HEDGE context. Direction remains neutral
-    until hedger_cycle_state() reports a RELEASE.
+    The 26W COT index is intentionally not used here anymore.  It remains an
+    advanced descriptive feature.  Direction is always neutral at the state
+    layer; a directional signal is emitted only by ``hedger_cycle_state`` once
+    the 156W percentile leaves an extreme.
     """
-    ci = float(row.get("commercial_index", np.nan))
-    ri = float(row.get("retail_index", np.nan))
     cp = float(row.get("commercial_net_percentile", np.nan))
     rp = float(row.get("retail_net_percentile", np.nan))
+    ci = float(row.get("commercial_index", np.nan))
 
-    if not all(np.isfinite(v) for v in [ci, ri, cp, rp]):
-        return {"state": "NEUTRAL", "direction": 0, "extreme_direction": 0, "strict": False, "net_backed": False}
+    if not np.isfinite(cp):
+        return {"state": "NEUTRAL", "direction": 0, "extreme_direction": 0, "strict": False, "net_backed": False, "commercial_percentile": np.nan, "legacy_cot_index": ci}
 
-    upper_state = ci >= upper
-    lower_state = ci <= lower
-    upper_strict = upper_state and ri <= lower
-    lower_strict = lower_state and ri >= upper
-    upper_net = upper_state and cp >= validation_upper and rp <= validation_lower
-    lower_net = lower_state and cp <= validation_lower and rp >= validation_upper
+    if cp >= validation_upper:
+        retail_opposite = bool(np.isfinite(rp) and rp <= validation_lower)
+        return {
+            "state": "FULL HEDGE · 156W EXTREME", "direction": 0,
+            "extreme_direction": 1, "strict": retail_opposite, "net_backed": True,
+            "commercial_percentile": cp, "legacy_cot_index": ci,
+        }
 
-    if upper_state:
-        if upper_strict and upper_net:
-            state = "FULL HEDGE · CONFIRMED STATE"
-        elif upper_net:
-            state = "FULL HEDGE · NET BACKED"
-        elif upper_strict:
-            state = "FULL HEDGE · INDEX EXTREME"
-        else:
-            state = "FULL HEDGE · WATCH"
-        return {"state": state, "direction": 0, "extreme_direction": 1, "strict": bool(upper_strict), "net_backed": bool(upper_net)}
+    if cp <= validation_lower:
+        retail_opposite = bool(np.isfinite(rp) and rp >= validation_upper)
+        return {
+            "state": "LOW HEDGE · 156W EXTREME", "direction": 0,
+            "extreme_direction": -1, "strict": retail_opposite, "net_backed": True,
+            "commercial_percentile": cp, "legacy_cot_index": ci,
+        }
 
-    if lower_state:
-        if lower_strict and lower_net:
-            state = "LOW HEDGE · CONFIRMED STATE"
-        elif lower_net:
-            state = "LOW HEDGE · NET BACKED"
-        elif lower_strict:
-            state = "LOW HEDGE · INDEX EXTREME"
-        else:
-            state = "LOW HEDGE · WATCH"
-        return {"state": state, "direction": 0, "extreme_direction": -1, "strict": bool(lower_strict), "net_backed": bool(lower_net)}
-
-    return {"state": "NEUTRAL", "direction": 0, "extreme_direction": 0, "strict": False, "net_backed": False}
-
+    return {
+        "state": "NORMAL · 156W", "direction": 0, "extreme_direction": 0,
+        "strict": False, "net_backed": False, "commercial_percentile": cp,
+        "legacy_cot_index": ci,
+    }
 
 def attach_cot_prices(cot: pd.DataFrame, prices: pd.DataFrame) -> pd.DataFrame:
     """Compatibility wrapper around the audited Tuesday/COT price alignment."""

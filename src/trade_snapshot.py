@@ -63,11 +63,12 @@ from .prices import load_prices, price_alignment_audit
 from .price_units import auto_market_reference_entry, plan_price_to_mt5, price_factor_to_mt5
 from .publication import publication_info
 from .report_analysis import enrich_report_positioning
+from .positioning_regime import classify_regime_stage, load_cross_group_context, load_price_structure
 from .seasonality import forward_statistics, seasonal_consistency
 from .watchlist_seasonality_core import classify_asset_seasonality, summarize_multi_horizon
 
 
-SNAPSHOT_BUILDER_VERSION = "V3.6.2"
+SNAPSHOT_BUILDER_VERSION = "V3.10.0"
 
 
 def _finite(value: Any) -> float:
@@ -151,18 +152,19 @@ def _confirmation_snapshot(latest: pd.Series, cycle: Mapping[str, Any] | None = 
     phase = str(cycle.get("phase") or "").upper()
     direction = int(cycle.get("direction", 0) or 0) if phase == "RELEASE" else 0
     extreme_direction = int(cycle.get("extreme_direction", 0) or 0)
-    flags = {"cot": False, "commercial": False, "noncommercial": False, "retail": False}
+    extreme_pct = _finite(cycle.get("extreme_percentile"))
+    flags = {"release": False, "commercial": False, "noncommercial": False, "retail": False}
     if direction > 0:
         flags = {
-            "cot": True,
-            "commercial": bool(np.isfinite(comm) and comm >= NET_UPPER_PERCENTILE),
+            "release": True,
+            "commercial": bool(np.isfinite(extreme_pct) and extreme_pct >= NET_UPPER_PERCENTILE),
             "noncommercial": bool(np.isfinite(nc) and nc <= NET_LOWER_PERCENTILE),
             "retail": bool(np.isfinite(retail) and retail <= NET_LOWER_PERCENTILE),
         }
     elif direction < 0:
         flags = {
-            "cot": True,
-            "commercial": bool(np.isfinite(comm) and comm <= NET_LOWER_PERCENTILE),
+            "release": True,
+            "commercial": bool(np.isfinite(extreme_pct) and extreme_pct <= NET_LOWER_PERCENTILE),
             "noncommercial": bool(np.isfinite(nc) and nc >= NET_UPPER_PERCENTILE),
             "retail": bool(np.isfinite(retail) and retail >= NET_UPPER_PERCENTILE),
         }
@@ -175,6 +177,13 @@ def _confirmation_snapshot(latest: pd.Series, cycle: Mapping[str, Any] | None = 
         "cycle_phase": phase or "NONE",
         "extreme_direction": extreme_direction,
         "release_active": bool(phase == "RELEASE" and direction != 0),
+        "transition": str(cycle.get("transition") or ""),
+        "commercial_net_percentile_156w": comm,
+        "commercial_extreme_percentile_156w": extreme_pct,
+        "commercial_percentile_delta_1w": _finite(cycle.get("percentile_change_1w")),
+        "commercial_percentile_delta_2w": _finite(cycle.get("percentile_change_2w")),
+        "commercial_percentile_delta_4w": _finite(cycle.get("percentile_change_4w")),
+        "commercial_percentile_distance_from_extreme": _finite(cycle.get("distance_from_extreme")),
         "confirmations": confirmations,
         "label": f"{confirmations}/4" if confirmations else "0/4",
         "flags": flags,
@@ -252,13 +261,13 @@ def collect_market_research_snapshot(asset_class: str, market: Mapping[str, Any]
         )
         cot["noncommercial_index"] = cot_index(cot["noncommercial_net"], COT_INDEX_WEEKS)
         valid = cot.dropna(subset=[
-            "commercial_index", "commercial_net_percentile", "noncommercial_net_percentile", "retail_net_percentile"
+            "commercial_net_percentile", "noncommercial_net_percentile", "retail_net_percentile"
         ])
         if valid.empty:
             raise RuntimeError("Nicht genügend Historie für aktuellen COT-Snapshot")
         latest = valid.iloc[-1]
         cycle = hedger_cycle_state(
-            cot, upper=INDEX_UPPER, lower=INDEX_LOWER, release_active_weeks=RELEASE_ACTIVE_WEEKS
+            cot, upper=NET_UPPER_PERCENTILE, lower=NET_LOWER_PERCENTILE, release_active_weeks=RELEASE_ACTIVE_WEEKS
         )
         confirmation = _confirmation_snapshot(latest, cycle)
         positioning = classify_positioning_bias(
@@ -274,13 +283,49 @@ def collect_market_research_snapshot(asset_class: str, market: Mapping[str, Any]
             "recent_12w": _records(cot, tail=12),
             "signal": current_signal(latest, INDEX_UPPER, INDEX_LOWER, cycle=cycle),
             "positioning_state": positioning.get("state", "NEUTRAL"),
+            # Kept for backward-compatible feature history only. V3.10.0 UI and
+            # primary regime logic no longer use a 4/4 decision score.
             "confirmation_4of4": confirmation,
             "positioning": positioning,
-            "net_validation": net_validation(latest, validation_direction, NET_UPPER_PERCENTILE, NET_LOWER_PERCENTILE),
+            "net_validation": net_validation(
+                latest,
+                validation_direction,
+                NET_UPPER_PERCENTILE,
+                NET_LOWER_PERCENTILE,
+                cycle=cycle,
+            ),
             "commercial_range": commercial_range_state(latest),
             "velocity": positioning_velocity_state(latest, direction=confirmation["direction"]),
             "hedger_cycle": cycle,
             "publication": publication_info(latest["report_date"]),
+        }
+
+        expected_direction = int(cycle.get("direction", 0) or 0) if str(cycle.get("phase", "")).upper() == "RELEASE" else int(cycle.get("extreme_direction", 0) or 0)
+        cross = load_cross_group_context(asset_class, code, expected_direction) if expected_direction else {
+            "institutional_label": "Institutionell", "trend_label": "Trend-Funds",
+            "institutional": {}, "trend": {}, "nonreportable": {},
+            "nonreportable_percentile": np.nan, "error": None,
+        }
+        result["positioning_regime"] = {
+            "expected_direction": expected_direction,
+            "commercial_state": str(cycle.get("state", "")),
+            "commercial_phase": str(cycle.get("phase", "")),
+            "commercial_transition": str(cycle.get("transition", "")),
+            "commercial_net_percentile_156w": _finite(cycle.get("current_percentile")),
+            "commercial_extreme_percentile_156w": _finite(cycle.get("extreme_percentile")),
+            "commercial_delta_1w": _finite(cycle.get("percentile_change_1w")),
+            "commercial_delta_2w": _finite(cycle.get("percentile_change_2w")),
+            "commercial_delta_4w": _finite(cycle.get("percentile_change_4w")),
+            "institutional_label": cross.get("institutional_label"),
+            "institutional": _series_dict(cross.get("institutional")),
+            "trend_group_label": cross.get("trend_label"),
+            "trend_group": _series_dict(cross.get("trend")),
+            "nonreportable_percentile_156w": _clean_scalar(cross.get("nonreportable_percentile")),
+            "nonreportable": _series_dict(cross.get("nonreportable")),
+            "cross_group_error": cross.get("error"),
+            # Legacy 26W index deliberately remains available as a research/ML
+            # feature even though it is not part of the operational watchlist.
+            "legacy_commercial_index_26w": _finite(latest.get("commercial_index")),
         }
     except Exception as exc:
         result["errors"].append(f"COT: {exc}")
@@ -296,6 +341,21 @@ def collect_market_research_snapshot(asset_class: str, market: Mapping[str, Any]
             result["errors"].append(f"Preisproxy: {exc}")
     else:
         result["price_proxy"] = {"ticker": ticker, "available": False}
+
+    if "positioning_regime" in result:
+        expected_direction = int(result["positioning_regime"].get("expected_direction", 0) or 0)
+        price_context = load_price_structure(ticker, expected_direction) if expected_direction else {
+            "label": "N/V", "tone": "neutral", "confirming": False,
+        }
+        result["positioning_regime"]["price"] = _series_dict(price_context)
+        result["positioning_regime"]["stage"] = classify_regime_stage(
+            cycle_phase=result["positioning_regime"].get("commercial_phase"),
+            commercial_transition=result["positioning_regime"].get("commercial_transition"),
+            institutional=result["positioning_regime"].get("institutional"),
+            trend=result["positioning_regime"].get("trend_group"),
+            nonreportable=result["positioning_regime"].get("nonreportable"),
+            price=price_context,
+        )
 
     try:
         result["seasonality"] = _seasonality_snapshot(prices, int(result["legacy"]["confirmation_4of4"]["direction"]))

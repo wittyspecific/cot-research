@@ -57,6 +57,10 @@ def currency_cot_profile(
     cycle_direction: int = 0,
     extreme_direction: int = 0,
     cycle_state: str | None = None,
+    transition_state: str | None = None,
+    extreme_percentile=np.nan,
+    percentile_change_1w=np.nan,
+    percentile_change_4w=np.nan,
     index_upper: float = 80.0,
     index_lower: float = 20.0,
     net_upper: float = 80.0,
@@ -64,10 +68,10 @@ def currency_cot_profile(
 ) -> dict:
     """Return a transparent currency COT profile using release semantics.
 
-    V3.9.0 separates state from signal:
-      * an upper/lower COT extreme is a hedge STATE only;
-      * direction becomes active only during a Hedger RELEASE;
-      * the 1/4..4/4 count therefore uses RELEASE as gate 1.
+    V3.10.0 uses Commercial Net Percentile 156W as the primary state:
+      * an upper/lower 156W percentile extreme is a hedge STATE only;
+      * direction becomes active only after that percentile leaves the extreme;
+      * the 26W COT index remains descriptive/advanced research.
     """
     cot = float(commercial_index) if _finite(commercial_index) else np.nan
     comm = float(commercial_net_percentile) if _finite(commercial_net_percentile) else np.nan
@@ -79,13 +83,20 @@ def currency_cot_profile(
     extreme_dir = int(extreme_direction or 0)
     release_ok = direction != 0
 
+    extreme_pct = (
+        float(extreme_percentile)
+        if _finite(extreme_percentile)
+        else comm if direction != 0 and np.isfinite(comm) else np.nan
+    )
     comm_ok = nc_ok = retail_ok = False
     if direction > 0:
-        comm_ok = np.isfinite(comm) and comm >= float(net_upper)
+        # Commercial confirmation belongs to the extreme episode that just
+        # released; the current percentile is already below the upper boundary.
+        comm_ok = np.isfinite(extreme_pct) and extreme_pct >= float(net_upper)
         nc_ok = np.isfinite(nc) and nc <= float(net_lower)
         retail_ok = np.isfinite(retail) and retail <= float(net_lower)
     elif direction < 0:
-        comm_ok = np.isfinite(comm) and comm <= float(net_lower)
+        comm_ok = np.isfinite(extreme_pct) and extreme_pct <= float(net_lower)
         nc_ok = np.isfinite(nc) and nc >= float(net_upper)
         retail_ok = np.isfinite(retail) and retail >= float(net_upper)
 
@@ -113,6 +124,10 @@ def currency_cot_profile(
         "retail_net_percentile": retail,
         "cycle_phase": phase or "NONE",
         "cycle_state": str(cycle_state or ""),
+        "transition_state": str(transition_state or ""),
+        "extreme_percentile": extreme_pct,
+        "percentile_change_1w": float(percentile_change_1w) if _finite(percentile_change_1w) else np.nan,
+        "percentile_change_4w": float(percentile_change_4w) if _finite(percentile_change_4w) else np.nan,
         "extreme_direction": extreme_dir,
         "state_label": state_label,
         "signal_label": signal_label,

@@ -7,15 +7,17 @@ Diese Werte bilden die eingefrorene Standardmethodik. Änderungen sollen nicht
 die App explizit in einen Sensitivitätsmodus versetzt werden.
 """
 
-# Stufe 1 · COT-Index
-COT_INDEX_WEEKS = 26
-INDEX_UPPER = 80
-INDEX_LOWER = 20
-
-# Stufe 2 · Netto-Validierung / reales Commercial-Extrem
+# Primärer Commercial-Zustand · 156W Net Percentile
 NET_VALIDATION_WEEKS = 156
 NET_UPPER_PERCENTILE = 80
 NET_LOWER_PERCENTILE = 20
+
+# Advanced / Research-Kontext · legacy 26W COT-Index und Commercial-Range.
+# Diese Werte werden weiter berechnet und gespeichert, lösen aber V3.10.0
+# kein primäres Richtungs-Signal mehr aus.
+COT_INDEX_WEEKS = 26
+INDEX_UPPER = 80
+INDEX_LOWER = 20
 COMMERCIAL_RANGE_WEEKS = 26
 
 # Stufe 5 · Non-Commercial-Divergenz

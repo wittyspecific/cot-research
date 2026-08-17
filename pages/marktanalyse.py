@@ -61,6 +61,7 @@ from src.markets import CLASSIC_MARKETS
 from src.prices import load_prices, price_alignment_audit
 from src.publication import publication_info
 from src.report_analysis import enrich_report_positioning
+from src.positioning_regime import classify_regime_stage, load_cross_group_context, load_price_structure
 from src.nc_divergence import (
     build_divergence_history,
     current_divergence,
@@ -211,6 +212,17 @@ STATUS_DE = {
     "BULLISH RELEASE · ACTIVE": "BULLISCHER RELEASE · AKTIV",
     "BEARISH RELEASE · ACTIVE": "BÄRISCHER RELEASE · AKTIV",
     "POST-RELEASE / NO ACTIVE CYCLE": "NACH RELEASE / KEIN AKTIVER ZYKLUS",
+    "FULL HEDGE": "FULL HEDGE",
+    "FULL HEDGE · PERSISTENCE": "FULL HEDGE · PERSISTENZ",
+    "LOW HEDGE": "LOW HEDGE",
+    "LOW HEDGE · PERSISTENCE": "LOW HEDGE · PERSISTENZ",
+    "EARLY RELEASE · STILL EXTREME": "FRÜHER RELEASE · NOCH IM EXTREM",
+    "HEDGE DEEPENING": "HEDGE WIRD TIEFER",
+    "HEDGE STABLE": "HEDGE STABIL",
+    "CONFIRMED RELEASE": "RELEASE BESTÄTIGT",
+    "NORMALIZED": "NORMALISIERT",
+    "NORMAL": "NORMAL",
+    "NO DATA": "KEINE DATEN",
 
     # NC-Divergenz
     "NOT ENOUGH DATA": "ZU WENIG DATEN",
@@ -267,7 +279,7 @@ page_header(
     "Research · Markt",
     "COT Marktanalyse",
     "Zustand, Hedge-Release und Bestätigung klar getrennt.",
-    "V3.9.0 · STATE ≠ SIGNAL",
+    "V3.10.0 · POSITIONING REGIME",
 )
 
 nav_back_col, nav_hint_col = st.columns([0.22, 0.78])
@@ -432,9 +444,8 @@ cot["noncommercial_index"] = cot_index(
 
 valid = cot.dropna(
     subset=[
-        "commercial_index",
-        "retail_index",
         "commercial_net_percentile",
+        "noncommercial_net_percentile",
         "retail_net_percentile",
     ]
 )
@@ -442,8 +453,8 @@ valid = cot.dropna(
 if valid.empty:
     st.warning(
         f"Für {market['name']} sind nicht genügend Wochen vorhanden, "
-        f"um den {cot_weeks}-Wochen-COT-Index und die "
-        f"{validation_weeks}-Wochen-Netto-Validierung gleichzeitig zu berechnen."
+        f"um das Commercial-Netto-Perzentil über {validation_weeks} Wochen "
+        "und die Bestätigungsdaten gleichzeitig zu berechnen."
     )
     st.stop()
 
@@ -457,7 +468,12 @@ positioning = classify_positioning_bias(
     validation_lower=validation_lower,
 )
 range_state = commercial_range_state(latest)
-cycle = hedger_cycle_state(cot, upper=upper, lower=lower, release_active_weeks=RELEASE_ACTIVE_WEEKS)
+cycle = hedger_cycle_state(
+    cot,
+    upper=validation_upper,
+    lower=validation_lower,
+    release_active_weeks=RELEASE_ACTIVE_WEEKS,
+)
 research_direction = int(cycle.get("direction", 0) or 0) if cycle.get("phase") == "RELEASE" else 0
 context_direction = research_direction if research_direction else int(cycle.get("extreme_direction", 0) or 0)
 velocity = positioning_velocity_state(latest, direction=context_direction)
@@ -598,6 +614,7 @@ validation = net_validation(
     validation_direction,
     upper=validation_upper,
     lower=validation_lower,
+    cycle=cycle,
 )
 
 comm_net_pct = float(latest["commercial_net_percentile"])
@@ -610,6 +627,25 @@ oi_change_4w = float(latest["open_interest_change_4w"])
 oi_change_4w_pct = float(latest["open_interest_change_4w_pct"])
 oi_change_4w_percentile = float(latest["open_interest_change_4w_percentile"])
 
+# V3.10.0 · Divide-and-conquer positioning regime context.
+# The Commercial 156W cycle stays primary; detailed CFTC groups are separate
+# confirmation layers and never retroactively redefine the Commercial state.
+regime_cross = load_cross_group_context(asset_class, str(code), int(context_direction)) if int(context_direction) != 0 else {
+    "institutional_label": "Institutionell", "trend_label": "Trend-Funds",
+    "institutional": {}, "trend": {}, "nonreportable": {},
+    "nonreportable_percentile": np.nan, "error": None,
+}
+regime_price = load_price_structure(price_ticker, int(context_direction)) if int(context_direction) != 0 else {
+    "label": "N/V", "tone": "neutral", "confirming": False,
+}
+regime_stage = classify_regime_stage(
+    cycle_phase=str(cycle.get("phase", "")),
+    commercial_transition=str(cycle.get("transition", "")),
+    institutional=regime_cross.get("institutional"),
+    trend=regime_cross.get("trend"),
+    nonreportable=regime_cross.get("nonreportable"),
+    price=regime_price,
+)
 
 
 # ------------------------------------------------------------------
@@ -830,80 +866,74 @@ with action_c:
         st.switch_page("pages/datenmodell.py")
 
 definition(
-    "State ≠ Signal: Ein hoher Commercial COT-Index beschreibt FULL HEDGE. Erst ein Hedge-Release aus der Extremzone aktiviert die bullishe/bärische Richtung. Extremwerte allein werden hier nicht mehr als Signal eingefärbt."
+    "Teile & herrsche: Commercial Net Percentile 156W ist nur die Ausgangslage. Ein historisches Extrem "
+    "erhöht die Aufmerksamkeit, erzeugt aber keine Richtung. Danach werden Transition, detaillierte CFTC-Gruppen, "
+    "Nonreportable-Kontext und Preisstruktur getrennt überwacht. Legacy Non-Commercial bleibt dabei keine zusätzliche unabhängige Bestätigung. "
+    "Der 26W-COT-Index bleibt ausschließlich Advanced Research."
 )
+
+_inst = dict(regime_cross.get("institutional") or {})
+_trend = dict(regime_cross.get("trend") or {})
+_nr = dict(regime_cross.get("nonreportable") or {})
 
 stage_summary(
     [
         {
-            "label": "COT-Index",
-            "primary": (
-                f"Commercial {_index_context(float(latest['commercial_index']))}"
-            ),
+            "label": "1 · Commercial 156W",
+            "primary": f"{comm_net_pct:.1f}. Perzentil · {de_status(cycle.get('state', positioning['state']))}",
             "detail": (
-                f"Non-Commercial {_index_context(nc_index)} · "
-                f"Retail {_index_context(float(latest['retail_index']))}. "
-                f"COT-Index = Position innerhalb des {cot_weeks}W-Min/Max-Fensters."
+                f"Historischer Zustand · Extremgrenzen {validation_upper:.0f}/{validation_lower:.0f}. "
+                "Noch kein Trade-Signal aus dem Extrem selbst."
             ),
             "tone": "",
         },
         {
-            "label": "Netto-Validierung",
-            "primary": de_status(validation["status"]),
+            "label": "2 · Transition / Release",
+            "primary": de_status(cycle.get("transition", "—")),
             "detail": (
-                f"Commercial-Netto {_percentile_context(comm_net_pct, validation_upper, validation_lower)} · "
-                f"Non-Commercial-Netto {_percentile_context(nc_net_pct, validation_upper, validation_lower)} · "
-                f"Retail-Netto {_percentile_context(retail_net_pct, validation_upper, validation_lower)} · "
-                f"{de_status(range_state['state'])}. NC dient hier als Trend-/Crowding-Kontext, "
-                "nicht als zusätzliche unabhängige Bestätigung."
-            ),
-            "tone": "",
-        },
-        {
-            "label": "Positionierungs-Velocity",
-            "primary": (
-                f"Δ4W {_fmt_contracts(latest['commercial_change_4w'])} Kontrakte · "
-                f"{latest['commercial_change_4w_percentile']:.1f}. Perzentil"
-            ),
-            "detail": (
-                f"{accel_label} · 4W-Beschleunigung "
-                f"{_fmt_contracts(latest['commercial_acceleration_4w'])} Kontrakte."
-            ),
-            "tone": "",
-        },
-        {
-            "label": "Hedger-Zyklus",
-            "primary": de_status(cycle["state"]),
-            "detail": (
-                f"Extremdauer {cycle['extreme_duration']}W · {weeks_since_release_text} · "
-                "Episode-Extremindex "
-                + ("—" if pd.isna(cycle["extreme_index"]) else f"{cycle['extreme_index']:.1f}")
-                + "."
+                f"Δ1W {cycle.get('percentile_change_1w', np.nan):+.1f} · "
+                f"Δ2W {cycle.get('percentile_change_2w', np.nan):+.1f} · "
+                f"Δ4W {cycle.get('percentile_change_4w', np.nan):+.1f} Pkt · {weeks_since_release_text}."
             ),
             "tone": _direction_tone(cycle["state"]) if cycle.get("phase") == "RELEASE" else "",
         },
         {
-            "label": "Speculativer Flow",
-            "primary": de_status(spec_div.get("flow_label")),
+            "label": f"3 · {regime_cross.get('institutional_label','Institutionell')}",
+            "primary": str(_inst.get("label", "WARTET")),
             "detail": (
-                f"{spec_source} · Netto/OI-Level "
-                + ("—" if pd.isna(spec_level_pct) else f"{spec_level_pct:.1f}. Perzentil")
-                + f" · Δ4W {_fmt_contracts(spec_flow_raw)} Kontrakte · "
-                + ("z Flow —" if pd.isna(spec_z_flow) else f"z Flow {spec_z_flow:+.2f}")
-                + f" · Divergenz: {de_status(spec_div.get('status'))}. "
-                + "Kontextfaktor; nicht automatisch eine unabhängige Commercial-Bestätigung."
+                ("156W —" if pd.isna(_inst.get("percentile", np.nan)) else f"156W {_inst.get('percentile'):.1f}")
+                + (" · Δ4W —" if pd.isna(_inst.get("delta_4w", np.nan)) else f" · Δ4W {_inst.get('delta_4w'):+.1f}")
+                + ". Beobachtet, ob institutionelle Positionierung über 1–4 Wochen mitdreht."
             ),
-            "tone": _direction_tone(spec_div.get("flow_label")),
+            "tone": "bull" if _inst.get("aligned") and context_direction > 0 else "bear" if _inst.get("aligned") and context_direction < 0 else "",
         },
         {
-            "label": "Saisonalität",
-            "primary": seasonal_state["status"],
+            "label": f"4 · {regime_cross.get('trend_label','Trend-Funds')}",
+            "primary": str(_trend.get("label", "WARTET")),
             "detail": (
-                f"Nächste {seasonal_primary_horizon} Handelstage · "
-                f"{seasonal_state['detail']} · {seasonal_state['window_detail']}. "
-                f"Basisrate = Positiv-Quote aller Kalenderphasen desselben Marktes/Horizonts."
+                ("156W —" if pd.isna(_trend.get("percentile", np.nan)) else f"156W {_trend.get('percentile'):.1f}")
+                + (" · Δ4W —" if pd.isna(_trend.get("delta_4w", np.nan)) else f" · Δ4W {_trend.get('delta_4w'):+.1f}")
+                + ". Trendposition wird auf Verlangsamung, Abbau oder echte Drehung geprüft."
             ),
-            "tone": _direction_tone(seasonal_state["status"]),
+            "tone": "bull" if _trend.get("aligned") and context_direction > 0 else "bear" if _trend.get("aligned") and context_direction < 0 else "",
+        },
+        {
+            "label": "5 · Nonreportable",
+            "primary": str(_nr.get("label", "WARTET")),
+            "detail": (
+                ("156W —" if pd.isna(regime_cross.get("nonreportable_percentile", np.nan)) else f"156W {regime_cross.get('nonreportable_percentile'):.1f}")
+                + ". Konträrer Kontext; bewusst nicht automatisch als Retail bezeichnet."
+            ),
+            "tone": "",
+        },
+        {
+            "label": "Regime / Kontext",
+            "primary": str(regime_stage.get("label", "NORMAL")),
+            "detail": (
+                f"Preis: {regime_price.get('label','—')} · Saison: {seasonal_state['status']}. "
+                "CONTEXT READY bleibt Vorstufe; S&D, Entry, SL und TP werden separat geplant."
+            ),
+            "tone": "bull" if regime_stage.get("stage", 0) >= 4 and context_direction > 0 else "bear" if regime_stage.get("stage", 0) >= 4 and context_direction < 0 else "",
         },
     ]
 )
@@ -917,11 +947,11 @@ st.caption(
 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
     [
-        "1 · COT-Index",
-        "2–3 · Netto & Flow",
-        "4 · Hedger-Zyklus",
-        "5 · Spec-Flow",
-        "6 · Saisonalität",
+        "1 · Commercial 156W",
+        "2 · Netto & Flow",
+        "3 · Transition & Release",
+        "4 · Spec-Flow",
+        "5 · Saisonalität",
         "Historie",
         "Methodik",
     ]
@@ -930,171 +960,116 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
 
 
 with tab1:
-    section_line("Stufe 1 · COT-Index", "26 Wochen · Extremgrenzen 80 / 20")
+    section_line("Commercial Positioning · 156W", "Primärer Zustand · Extrem ≠ Signal")
     definition(
-        "COT-Index = Position der aktuellen Netto-Position zwischen Minimum und "
-        "Maximum des festgelegten Fensters. Commercials werden mit Legacy "
-        "Non-Commercials und Retail auf derselben 0–100-Skala verglichen. "
-        "Ein Extrem beschreibt eine Positionierungsphase, aber noch keinen Trade "
-        "oder Wendepunkt."
-    )
-    st.markdown("### Positionierungssignal")
-    st.caption(
-        "Chart-Steuerung: Mausrad = Zoom · Ziehen = Verschieben · "
-        "1J/3J/5J/MAX = Zeitraum · Doppelklick = Reset · "
-        "Y-Skala rechts ziehen = vertikal stauchen / strecken."
-    )
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=cot["report_date"],
-        y=cot["commercial_index"],
-        mode="lines",
-        name="Commercial COT-Index",
-        line=dict(width=2),
-    ))
-    fig.add_trace(go.Scatter(
-        x=cot["report_date"],
-        y=cot["noncommercial_index"],
-        mode="lines",
-        name="Non-Commercial COT-Index",
-        line=dict(width=1.8, dash="dash"),
-    ))
-    fig.add_trace(go.Scatter(
-        x=cot["report_date"],
-        y=cot["retail_index"],
-        mode="lines",
-        name="Retail COT-Index",
-        line=dict(width=1.5, dash="dot"),
-    ))
-    fig.add_hline(y=upper, line_dash="dash", opacity=.35)
-    fig.add_hline(y=lower, line_dash="dash", opacity=.35)
-    fig.update_layout(
-        height=390,
-        margin=dict(l=0, r=0, t=25, b=0),
-        yaxis=dict(range=[0, 100], title="COT-Index"),
-        xaxis_title=None,
-        legend=dict(orientation="h", y=1.08),
-    )
-    tradingview_chart(
-        fig,
-        x_values=cot["report_date"],
-        default_years=3,
-        reset_y_range=(0, 100),
-        date_axis=True,
-        uirevision=f"cot-index-{market['symbol']}",
-    )
-    tradingview_plotly_chart(
-        fig,
-        config=plotly_config(),
+        "Commercial Net Percentile 156W = historischer Rang der aktuellen Commercial-Netto-Position. "
+        "Das Perzentil bleibt immer sichtbar. Ein Extrem ist zunächst nur FULL/LOW HEDGE; erst das "
+        "Verlassen der Zone erzeugt ein Richtungs-Signal."
     )
 
-    st.markdown("### Langfristige Netto-Positions-Perzentile")
-    st.caption(
-        "Direktvergleich auf derselben 0–100-Skala: Commercial-, Non-Commercial- "
-        "und Retail-Netto werden jeweils als rollierendes 156W-Perzentil eingeordnet. "
-        "Besonders interessant sind Phasen, in denen Commercials und "
-        "Non-Commercials an entgegengesetzten Extremen liegen."
-    )
     fig_pct = go.Figure()
     fig_pct.add_trace(go.Scatter(
-        x=cot["report_date"],
-        y=cot["commercial_net_percentile"],
-        mode="lines",
-        name="Commercial-Netto-Perzentil · 156W",
-        line=dict(width=2),
+        x=cot["report_date"], y=cot["commercial_net_percentile"], mode="lines",
+        name="Commercial-Netto-Perzentil · 156W", line=dict(width=2.4),
     ))
     fig_pct.add_trace(go.Scatter(
-        x=cot["report_date"],
-        y=cot["noncommercial_net_percentile"],
-        mode="lines",
-        name="Non-Commercial-Netto-Perzentil · 156W",
-        line=dict(width=1.8, dash="dash"),
+        x=cot["report_date"], y=cot["noncommercial_net_percentile"], mode="lines",
+        name="Non-Commercial-Netto-Perzentil · 156W", line=dict(width=1.5, dash="dash"),
     ))
     fig_pct.add_trace(go.Scatter(
-        x=cot["report_date"],
-        y=cot["retail_net_percentile"],
-        mode="lines",
-        name="Retail-Netto-Perzentil · 156W",
-        line=dict(width=1.5, dash="dot"),
+        x=cot["report_date"], y=cot["retail_net_percentile"], mode="lines",
+        name="Retail-Netto-Perzentil · 156W", line=dict(width=1.3, dash="dot"),
     ))
-    fig_pct.add_hline(
-        y=validation_upper,
-        line_dash="dash",
-        opacity=.35,
-    )
-    fig_pct.add_hline(
-        y=validation_lower,
-        line_dash="dash",
-        opacity=.35,
-    )
+    fig_pct.add_hline(y=validation_upper, line_dash="dash", opacity=.35)
+    fig_pct.add_hline(y=validation_lower, line_dash="dash", opacity=.35)
     fig_pct.update_layout(
-        height=390,
-        margin=dict(l=0, r=0, t=25, b=0),
-        yaxis=dict(range=[0, 100], title="Historisches Perzentil"),
-        xaxis_title=None,
+        height=430, margin=dict(l=0, r=0, t=25, b=0),
+        yaxis=dict(range=[0, 100], title="156W Perzentil"), xaxis_title=None,
         legend=dict(orientation="h", y=1.08),
     )
     tradingview_chart(
-        fig_pct,
-        x_values=cot["report_date"],
-        default_years=3,
-        reset_y_range=(0, 100),
-        date_axis=True,
-        uirevision=f"net-percentiles-{market['symbol']}",
+        fig_pct, x_values=cot["report_date"], default_years=3,
+        reset_y_range=(0, 100), date_axis=True,
+        uirevision=f"commercial-156w-{market['symbol']}",
     )
-    tradingview_plotly_chart(
-        fig_pct,
-        config=plotly_config(),
-    )
+    tradingview_plotly_chart(fig_pct, config=plotly_config())
+    st.caption("Y-Skala rechts ziehen = vertikal stauchen / strecken")
 
-    crowd_a, crowd_b, crowd_c, crowd_d = st.columns(
-        [1.0, 1.0, 1.35, 1.15],
-        gap="small",
-    )
+    c1, c2, c3, c4 = st.columns(4, gap="small")
+    with c1:
+        metric_card("Commercial Netto · 156W", f"{comm_net_pct:.1f}", de_status(positioning["state"]))
+    with c2:
+        metric_card(
+            "TRANSITION",
+            de_status(cycle.get("transition", "—")),
+            f"Δ1W {cycle.get('percentile_change_1w', np.nan):+.1f} · Δ4W {cycle.get('percentile_change_4w', np.nan):+.1f}",
+        )
+    with c3:
+        metric_card(
+            "RELEASE",
+            de_status(cycle["state"]),
+            "Signal aktiv" if cycle.get("phase") == "RELEASE" else "Noch kein Richtungs-Signal",
+        )
+    with c4:
+        metric_card(
+            "EPISODEN-EXTREM",
+            "—" if pd.isna(cycle.get("extreme_percentile", np.nan)) else f"{cycle['extreme_percentile']:.1f}",
+            f"Extremdauer {cycle.get('extreme_duration', 0)}W",
+        )
+
+    with st.expander("Advanced · 26W COT-Index anzeigen", expanded=False):
+        st.caption(
+            "Der 26W-COT-Index bleibt vollständig verfügbar, beeinflusst aber die primäre "
+            "V3.10.0 State/Release-Logik nicht mehr."
+        )
+        fig_idx = go.Figure()
+        fig_idx.add_trace(go.Scatter(
+            x=cot["report_date"], y=cot["commercial_index"], mode="lines",
+            name="Commercial COT-Index · 26W", line=dict(width=2),
+        ))
+        fig_idx.add_trace(go.Scatter(
+            x=cot["report_date"], y=cot["noncommercial_index"], mode="lines",
+            name="Non-Commercial COT-Index", line=dict(width=1.5, dash="dash"),
+        ))
+        fig_idx.add_trace(go.Scatter(
+            x=cot["report_date"], y=cot["retail_index"], mode="lines",
+            name="Retail COT-Index · 26W", line=dict(width=1.3, dash="dot"),
+        ))
+        fig_idx.add_hline(y=upper, line_dash="dash", opacity=.35)
+        fig_idx.add_hline(y=lower, line_dash="dash", opacity=.35)
+        fig_idx.update_layout(
+            height=360, margin=dict(l=0, r=0, t=25, b=0),
+            yaxis=dict(range=[0, 100], title="26W COT-Index"), xaxis_title=None,
+            legend=dict(orientation="h", y=1.08),
+        )
+        tradingview_chart(
+            fig_idx, x_values=cot["report_date"], default_years=3,
+            reset_y_range=(0, 100), date_axis=True,
+            uirevision=f"cot-index-advanced-{market['symbol']}",
+        )
+        tradingview_plotly_chart(fig_idx, config=plotly_config())
+
+    crowd_a, crowd_b, crowd_c = st.columns([1.0, 1.0, 1.15], gap="small")
     with crowd_a:
         metric_card(
-            "Commercial Netto · 156W",
-            f"{comm_net_pct:.1f}. Perzentil",
-            _percentile_context(
-                comm_net_pct,
-                validation_upper,
-                validation_lower,
-            ),
+            "Non-Commercial Netto · 156W", f"{nc_net_pct:.1f}. Perzentil",
+            f"Δ4W {_fmt_contracts(nc_flow_change)} · Advanced 26W Index {nc_index:.1f}",
         )
     with crowd_b:
-        metric_card(
-            "Non-Commercial Netto · 156W",
-            f"{nc_net_pct:.1f}. Perzentil",
-            f"Langfristiges Netto-Perzentil · 26W COT-Index {nc_index:.1f} · "
-            f"Δ4W {_fmt_contracts(nc_flow_change)}",
-        )
+        metric_card("COMMERCIAL ↔ NC", nc_crowding["state"], nc_crowding["detail"])
     with crowd_c:
-        metric_card(
-            "Commercial ↔ NC",
-            nc_crowding["state"],
-            nc_crowding["detail"],
-        )
-    with crowd_d:
         metric_card(
             "Saison · 20J / 20-40-60T",
             market_multi_seasonality_summary["compact"],
             market_multi_seasonality_summary["overall"],
         )
 
-    st.caption(
-        "Interpretation: Legacy Commercial und Non-Commercial sind teilweise "
-        "mechanisch Gegenseiten desselben Futures-Marktes. Deshalb ist ein "
-        "Commercial-vs.-NC-Extrem keine zusätzliche unabhängige Bestätigung. "
-        "Die Saisonspalte verwendet dieselbe 20J/20-40-60T-Logik wie die Watchlist: "
-        "✓ unterstützt den aktuellen COT-Bias, ✕ läuft dagegen, — ist gemischt."
-    )
-
 with tab2:
-    section_line("Stufe 2–3 · Netto-Validierung & Flow", "156W Struktur · 1W/4W/8W Dynamik")
+    section_line("Netto & Flow", "Rohpositionierung · 156W-Transition · 1W/4W/8W Dynamik")
     definition(
-        "Netto-Perzentil = historischer Rang der aktuellen Netto-Position über "
-        "156 Wochen. Velocity beschreibt die Veränderung der Positionierung; "
-        "sie ist getrennt vom absoluten Niveau zu lesen."
+        "Das Commercial-156W-Perzentil ist der primäre Zustand. Zusätzlich werden "
+        "dessen Δ1W/Δ4W sowie die Roh-Netto-Veränderungen gespeichert, damit State "
+        "und Transition getrennt analysiert werden können."
     )
     st.markdown("### Netto-Positionierung")
     fig2 = go.Figure()
@@ -1295,23 +1270,22 @@ with tab2:
 with tab3:
     st.markdown("### Hedger-Zyklus · Eintritt, Persistenz, Release")
     st.caption(
-        "Das Commercial-Extrem wird als Phase behandelt. Entscheidend ist nicht nur, "
-        "dass 80/20 erreicht wurde, sondern wie lange die Hedger dort bleiben und wann "
-        "der Index die Zone wieder verlässt."
+        "Der Zyklus wird jetzt ausschließlich aus dem Commercial Net Percentile 156W abgeleitet. "
+        "Entscheidend sind Extremdauer, Transition und das tatsächliche Verlassen der 156W-Zone."
     )
 
     c_left, c_right = st.columns([1.25, .75], gap="large")
     with c_left:
         cyc_fig = go.Figure()
         cyc_fig.add_trace(go.Scatter(
-            x=cot["report_date"], y=cot["commercial_index"],
-            name="Commercial COT-Index", mode="lines", line=dict(width=2),
+            x=cot["report_date"], y=cot["commercial_net_percentile"],
+            name="Commercial-Netto-Perzentil · 156W", mode="lines", line=dict(width=2.4),
         ))
-        cyc_fig.add_hline(y=upper, line_dash="dash", opacity=.35)
-        cyc_fig.add_hline(y=lower, line_dash="dash", opacity=.35)
+        cyc_fig.add_hline(y=validation_upper, line_dash="dash", opacity=.35)
+        cyc_fig.add_hline(y=validation_lower, line_dash="dash", opacity=.35)
         cyc_fig.update_layout(
             height=420, margin=dict(l=0, r=0, t=25, b=0),
-            yaxis=dict(range=[0,100], title="Commercial COT-Index"),
+            yaxis=dict(range=[0,100], title="Commercial 156W Perzentil"),
             xaxis_title=None,
         )
         tradingview_chart(
@@ -1339,7 +1313,9 @@ with tab3:
                 Eintritt ins Extrem: <b>{entry_txt}</b><br>
                 Dauer des Extrems: <b>{cycle['extreme_duration']} Wochen</b><br>
                 Release-Datum: <b>{release_txt}</b><br>
-                Episoden-Extremindex: <b>{'—' if pd.isna(cycle['extreme_index']) else f"{cycle['extreme_index']:.1f}"}</b><br>
+                Transition: <b>{de_status(cycle.get('transition', '—'))}</b><br>
+                Episoden-Extrem 156W: <b>{'—' if pd.isna(cycle.get('extreme_percentile', np.nan)) else f"{cycle['extreme_percentile']:.1f}"}</b><br>
+                Advanced 26W Extremindex: <b>{'—' if pd.isna(cycle.get('extreme_index', np.nan)) else f"{cycle['extreme_index']:.1f}"}</b><br>
                 Episoden-Extremnetto: <b>{'—' if pd.isna(cycle['extreme_net']) else f"{cycle['extreme_net']:,.0f}"}</b>
               </p>
             </div>
@@ -1881,10 +1857,9 @@ with tab6:
     )
     st.markdown("### Historische Ereignisauswertung")
     st.caption(
-        "Ein Ereignis beginnt beim Eintritt in eine neue 80/20-COT-Index-Extremphase. "
-        "Für jedes historische Ereignis wird zusätzlich geprüft, ob die damaligen "
-        "Commercial- und Retail-Netto-Positionen über den längeren historischen "
-        "Validierungszeitraum ebenfalls extrem waren."
+        "Die primäre Release-Historie basiert jetzt auf dem Commercial Net Percentile 156W. "
+        "Ein Extrem ist zunächst nur ein Zustand; die Richtungsrendite beginnt erst nach dem "
+        "Verlassen der 156W-Zone. Die alte 26W-Index-Auswertung bleibt darunter als Vergleich."
     )
 
     if prices.empty:
@@ -1901,8 +1876,8 @@ with tab6:
         release_events = historical_hedger_releases(
             cot=cot,
             prices=prices,
-            upper=upper,
-            lower=lower,
+            upper=validation_upper,
+            lower=validation_lower,
             horizons=event_horizons,
         )
         if release_events.empty:
@@ -1931,7 +1906,7 @@ with tab6:
             )
             rel_cols = [
                 "event_date", "publication_date", "trade_date", "release",
-                "extreme_duration", "extreme_index", "extreme_net",
+                "extreme_duration", "extreme_percentile", "extreme_index", "extreme_net",
                 "release_commercial_net",
             ]
             rel_fmt = {
@@ -1951,14 +1926,16 @@ with tab6:
                 "trade_date": "Backtest-Start",
                 "release": "Release",
                 "extreme_duration": "Extremdauer (W)",
-                "extreme_index": "Extrem-Index",
+                "extreme_percentile": "Extrem 156W",
+                "extreme_index": "Advanced 26W Extrem-Index",
                 "extreme_net": "Extrem-Netto",
                 "release_commercial_net": "Commercial-Netto beim Release",
                 **{f"return_{h}w": f"Rendite {h}W" for h in event_horizons},
                 **{f"aligned_return_{h}w": f"Richtungsrendite {h}W" for h in event_horizons},
             })
             rel_fmt_de = {
-                "Extrem-Index": "{:.1f}",
+                "Extrem 156W": "{:.1f}",
+                "Advanced 26W Extrem-Index": "{:.1f}",
                 "Extrem-Netto": "{:,.0f}",
                 "Commercial-Netto beim Release": "{:,.0f}",
             }
@@ -2125,33 +2102,42 @@ with tab6:
             )
 
 with tab7:
-    st.markdown("### Definition des sechsstufigen Modells")
+    st.markdown("### V3.10.0 · Commercial 156W → Transition → Cross-Group Regime")
     st.code(
         f"""
-STUFE 1 — SCHNELLER COT-INDEX ({cot_weeks} Wochen)
+PRIMÄRER ZUSTAND — COMMERCIAL NET PERCENTILE ({validation_weeks} Wochen)
 
-Bullisch:
-  Commercial COT-Index >= {upper}
-  UND Retail COT-Index <= {lower}
-
-Bärisch:
-  Commercial COT-Index <= {lower}
-  UND Retail COT-Index >= {upper}
-
-
-STUFE 2 — NETTO-POSITIONS-VALIDIERUNG ({validation_weeks} Wochen)
-
-Bullische Bestätigung:
+FULL HEDGE:
   Commercial Netto-Perzentil >= {validation_upper}
-  UND Retail Netto-Perzentil <= {validation_lower}
+  → Extremzustand, noch KEIN bullishes Signal
 
-Bärische Bestätigung:
+LOW HEDGE:
   Commercial Netto-Perzentil <= {validation_lower}
-  UND Retail Netto-Perzentil >= {validation_upper}
+  → Extremzustand, noch KEIN bärisches Signal
 
 
-Commercial Netto = Commercial Long - Commercial Short
-Retail Netto     = Non-Reportable Long - Non-Reportable Short
+TRANSITION
+  Δ1W / Δ4W des Commercial-156W-Perzentils
+  + Distanz zum Episoden-Extrem
+  + Dauer der Extrem-Episode
+
+EARLY RELEASE:
+  Perzentil bewegt sich bereits zurück, liegt aber noch innerhalb der Extremzone
+  → WATCH, noch KEIN Richtungs-Signal
+
+CONFIRMED RELEASE:
+  oberes Extrem wird nach unten verlassen → BULLISH RELEASE
+  unteres Extrem wird nach oben verlassen → BEARISH RELEASE
+
+
+BESTÄTIGUNG
+  Commercial-Seite = vorausgegangenes Episoden-Extrem
+  Retail = aktuelles 156W Netto-Perzentil auf der Gegenseite
+  NC / Spec Flow = zusätzliche Bestätigungs- bzw. Kontextschicht
+
+ADVANCED
+  26W COT-Index + {range_weeks}W Commercial-Range bleiben vollständig verfügbar,
+  lösen aber kein primäres V3.10.0-Signal aus.
         """.strip(),
         language="text",
     )
@@ -2159,115 +2145,90 @@ Retail Netto     = Non-Reportable Long - Non-Reportable Short
     st.markdown("### Interpretation")
     st.markdown(
         f"""
-        - **BESTÄTIGT:** Index-Bias und beide Netto-Positionierungsseiten liegen
-          in den erwarteten historischen Extrembereichen.
-        - **TEILWEISE BESTÄTIGT:** Nur Commercial oder Retail bestätigt das Index-Signal.
-        - **NICHT BESTÄTIGT:** Der 80/20-Index ist extrem, die absoluten
-          Netto-Positionen sind über {validation_weeks} Wochen jedoch nicht
-          historisch extrem.
-        - Die Netto-Positionen werden zusätzlich relativ zum Open Interest
-          ausgewiesen. Diese OI-normalisierte Kennzahl dient als sekundäre
-          Kontrolle für strukturelles Wachstum oder Schrumpfen eines Futures-Marktes.
-        - Für die historische Statistik werden ausschließlich Informationen
-          verwendet, die zum jeweiligen damaligen COT-Report bereits bekannt waren.
-        """
-    )
-
-    st.markdown("### Commercial-Extrem-Range")
-    st.markdown(
-        f"""
-        Zusätzlich zum COT-Index werden das tatsächliche **{range_weeks}-Wochen-Hoch** und
-        **{range_weeks}-Wochen-Tief** der Commercial-Netto-Position gespeichert. Dadurch ist
-        sichtbar, ob ein hoher Index auch mit einer tatsächlich hohen Netto-Position einhergeht.
+        - **Commercial Net Percentile 156W bleibt der zentrale sichtbare Wert.** Er beschreibt,
+          wo die aktuelle Commercial-Netto-Position relativ zu den letzten {validation_weeks} Wochen liegt.
+        - Ein Wert im oberen oder unteren Extrem ist zunächst **STATE, nicht SIGNAL**.
+        - **Transition** misst die Bewegung dieses Zustands über Δ1W und Δ4W sowie die Distanz
+          zum Extrem der laufenden Episode.
+        - **Release** entsteht erst, wenn die 156W-Extremzone tatsächlich verlassen wird.
+        - Die Commercial-Bestätigung eines Releases referenziert bewusst das vorausgegangene
+          Episoden-Extrem. Der aktuelle Commercial-Wert liegt beim Release bereits außerhalb
+          der Zone und darf das korrekte Signal nicht selbst entbestätigen.
+        - Retail, Non-Commercial und Spec Flow bleiben als Bestätigung/Kontext erhalten.
+        - Open Interest bleibt sekundärer Partizipationskontext.
+        - Die historische Auswertung verwendet nur Informationen, die zum jeweiligen Report
+          bereits verfügbar waren.
         """
     )
 
     st.markdown("### Positionierungsdynamik")
     st.markdown(
         """
-        Commercial-, Retail- und Non-Commercial-Netto-Positionen werden über 1, 4 und 8 Wochen
-        differenziert. Die 4-Wochen-Veränderung wird zusätzlich historisch als Perzentil eingeordnet.
-        `4W Acceleration` vergleicht die jüngsten vier Wochen mit den vier Wochen davor.
+        Für Commercials werden neben dem aktuellen 156W-Perzentil dessen **Δ1W, Δ4W und Δ8W**,
+        die Distanz zum Episoden-Extrem und die Dauer der Extremphase gespeichert. Die bereits
+        vorhandenen Veränderungen der absoluten Netto-Kontrakte bleiben parallel verfügbar.
+        Dadurch werden Zustand und Bewegung getrennt statt in einem einzelnen Index vermischt.
+        """
+    )
+
+    st.markdown("### 26W COT-Index & Commercial-Range · Advanced")
+    st.markdown(
+        f"""
+        Der **{cot_weeks}W COT-Index** und die **{range_weeks}W Commercial-Range** werden nicht gelöscht.
+        Sie bleiben in Charts, Research Lab und Trade-Snapshots erhalten und können später auch
+        im Machine Learning gegen die 156W-State/Release-Logik getestet werden. Sie sind aber
+        **keine Gate-Bedingung** für das primäre Release-Signal mehr.
         """
     )
 
     st.markdown("### Analysehierarchie")
     st.markdown(
         """
-        Der Kopfbereich enthält nur noch die sechs Informationen, die zur schnellen
-        Einordnung des aktuellen Marktes benötigt werden. Retail-Details, Range-Rohwerte,
-        1W/8W-Veränderungen und Divergenzkomponenten bleiben in den Tabs.
-        Ein künstlicher aggregierter Validierungs-Bewertung wird nicht mehr verwendet.
+        Die erste Ebene zeigt Commercial 156W, Transition, Release und Bestätigung. Rohdaten,
+        COT-Index, Range, zusätzliche Velocity-Metriken und methodische Details bleiben in den
+        Advanced-Tabs verfügbar. Commercial und Legacy-NC werden dabei weiterhin **nicht als
+        zwei unabhängige Bestätigungen** gezählt.
         """
     )
 
     st.markdown("### Non-Commercial-Niveau vs. Dynamik")
     st.markdown(
         f"""
-        Das Legacy-Non-Commercial-Level wird als rollierendes historisches
-        Netto-Perzentil über **{validation_weeks} Wochen** und zusätzlich als
-        **{cot_weeks}W-COT-Index** dargestellt. Der 156W-Wert ist die langfristigere
-        Extrem-Einordnung; der 26W-COT-Index ist die kurzfristigere Min/Max-Einordnung.
-        Die Dynamik wird davon getrennt als 4-Wochen-Veränderung und deren
-        historisches Perzentil betrachtet.
-
-        Ein extremes NC-Level beschreibt vor allem **Trend-Crowding / Positionierungsphase**.
-        Es wird nicht automatisch als Top oder Boden interpretiert. Interessanter für
-        einen möglichen Wendepunkt ist die Kombination aus extremem Level und einem
-        anschließend gegenläufig drehenden NC-Flow. Commercial und Legacy NC werden
-        dabei ausdrücklich nicht als zwei unabhängige Bestätigungen gezählt.
-        """
-    )
-
-    st.markdown("### Open Interest")
-    st.markdown(
-        f"""
-        Open Interest wird über vier Wochen verändert und ebenfalls über
-        **{validation_weeks} Wochen** historisch eingeordnet. Es dient aktuell nur als
-        Partizipationskontext und verändert den Richtungs-Bias noch nicht.
+        Non-Commercial bleibt als 156W-Netto-Perzentil, {cot_weeks}W-COT-Index und Flow-Dynamik
+        verfügbar. Ein extremes NC-Level beschreibt vor allem Crowding/Positionierungsphase.
+        Für einen möglichen Wendepunkt ist die Kombination aus Level und anschließend
+        gegenläufig drehendem Flow interessanter als der statische Wert allein.
         """
     )
 
     st.markdown("### Eingefrorene Produktionsparameter")
     st.markdown(
         f"""
-        Die reguläre Analyse arbeitet mit einer **festen Methodik**:
-
-        - COT-Index: **{COT_INDEX_WEEKS} Wochen**
-        - Index-Extremgrenzen: **{INDEX_UPPER}/{INDEX_LOWER}**
-        - Netto-Historie: **{NET_VALIDATION_WEEKS} Wochen**
-        - Netto-Perzentil-Grenzen: **{NET_UPPER_PERCENTILE}/{NET_LOWER_PERCENTILE}**
-        - Commercial-Extrem-Range: **{COMMERCIAL_RANGE_WEEKS} Wochen**
-        - Legacy-NC-Divergenz (nur Vergleich): **{NC_DIVERGENCE_WEEKS} Wochen**, mindestens **{NC_CONFIRMING_WEEKS}** bestätigende Wochen
-        - Legacy Mindest-Preisbewegung: **{NC_MIN_PRICE_MOVE_PCT:.2f}%**
-        - Legacy Mindest-NC-Netto-Veränderung: **{NC_MIN_NET_CHANGE_GROSS_PCT:.2f}%**
+        - Primärer Commercial-State: **Netto-Perzentil über {NET_VALIDATION_WEEKS} Wochen**
+        - 156W Extremgrenzen: **{NET_UPPER_PERCENTILE}/{NET_LOWER_PERCENTILE}**
+        - Transition: **Δ1W / Δ4W / Δ8W**, Episoden-Extrem, Extremdauer
+        - Release aktiv: **{RELEASE_ACTIVE_WEEKS} Wochen** nach Verlassen der Extremzone
+        - Advanced COT-Index: **{COT_INDEX_WEEKS} Wochen**, Grenzen **{INDEX_UPPER}/{INDEX_LOWER}**
+        - Advanced Commercial-Range: **{COMMERCIAL_RANGE_WEEKS} Wochen**
+        - Legacy-NC-Divergenz (nur Vergleich): **{NC_DIVERGENCE_WEEKS} Wochen**
         - Neue Spec-Flow-Methodik: Preis **{NC_DIV_PRICE_WINDOW_W}W**, Flow **{NC_DIV_FLOW_WINDOW_W}W**, Pfad **{NC_DIV_PATH_WINDOW_W}W**
-        - Neue robuste Historie: **{NC_DIV_STANDARDIZE_HIST_W}W** exaktes vorangehendes Kalenderfenster · z-Schwelle **{NC_DIV_Z_THRESHOLD:.1f}**
+        - Robuste Flow-Historie: **{NC_DIV_STANDARDIZE_HIST_W}W**, z-Schwelle **{NC_DIV_Z_THRESHOLD:.1f}**
         - OI-Normalisierung: **{NC_DIV_USE_OI_NORM}**
         - COT-Forward-Horizonte: **{FORWARD_HORIZONS_WEEKS[0]} und {FORWARD_HORIZONS_WEEKS[1]} Wochen**
         - Saisonaler IQR-Faktor: **{SEASONAL_OUTLIER_IQR_FACTOR:.2f}**
 
-        Auf der produktiven Marktanalyse gibt es dafür **keine Regler**.
-        Methodische Varianten werden getrennt im Research Lab untersucht, damit
-        die Produktionsparameter nicht nach einzelnen Märkten oder attraktiven
-        historischen Ergebnissen nachoptimiert werden.
+        Die produktive Marktanalyse hat dafür keine Optimierungsregler. Varianten werden
+        getrennt im Research Lab untersucht.
         """
     )
 
     st.markdown("### Bedingungs-Watchlist")
     st.markdown(
         f"""
-        Die Watchlist ist **keine Rangliste**. Ein Markt wird nur in die Hauptliste
-        aufgenommen, wenn drei boolesche Bedingungen gleichzeitig erfüllt sind:
-
-        1. Hedger-Zyklus befindet sich in **EXTREME** oder **RELEASE**.
-        2. Commercial- und Retail-Netto-Perzentile bestätigen die Zyklusrichtung
-           gemäß den aktuellen Schwellen **{validation_upper:.0f}/{validation_lower:.0f}**.
-        3. Commercial-Netto liegt am richtungskorrekten **{range_weeks}W-Range-Extrem**.
-
-        Die Anzahl der Einträge wird nicht auf eine feste Zielzahl aufgefüllt.
-        Korrelierte Kontrakte werden als Themen/Komplexe zusammengefasst.
-        Rohstoffe und Finanzwerte werden getrennt ausgewiesen.
+        Die Haupt-Watchlist enthält nur **aktive 156W-Releases**, die ihre Bestätigungslogik
+        erfüllen. Ein FULL/LOW HEDGE ohne verlassenes Extrem erscheint separat als **Watch / Waiting**.
+        Der {range_weeks}W-Range-Wert und der 26W-COT-Index bleiben informativer Kontext und
+        blockieren einen ansonsten gültigen 156W-Release nicht mehr.
         """
     )
 

@@ -6,12 +6,13 @@ import pandas as pd
 
 
 class NCPercentileConfirmationRegressionTests(unittest.TestCase):
-    def test_watchlist_uses_nc_as_fourth_condition(self):
+    def test_watchlist_replaces_old_fourth_condition_with_cross_group_pipeline(self):
         source = Path("pages/watchlist.py").read_text(encoding="utf-8")
-        self.assertIn('nc = _finite(row.get("noncommercial_net_percentile"))', source)
-        self.assertIn('"nc_ok": nc_ok', source)
-        self.assertIn('"4/4 Voll"', source)
-        self.assertIn('"Non-Commercials": f', source)
+        self.assertIn("Cross-Group Shift", source)
+        self.assertIn("Asset Manager + Leveraged Funds", source)
+        self.assertIn("Producer/Merchant + Managed Money", source)
+        self.assertIn("Nonreportable", source)
+        self.assertNotIn('"4/4 Voll"', source)
 
     def test_watchlist_engine_exposes_nc_percentile(self):
         source = Path("src/watchlist.py").read_text(encoding="utf-8")

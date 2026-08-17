@@ -8,7 +8,7 @@ from src.style import apply_style
 from src.trade_journal import initialize_journal, resolve_db_path
 from src.trader_auth import authenticate_trader, create_trader, get_trader, trader_count
 
-APP_VERSION = "3.9.0"
+APP_VERSION = "3.10.0"
 
 st.set_page_config(
     page_title="COT Research",
@@ -183,7 +183,7 @@ with st.sidebar:
         st.session_state.pop("v361_outcome_synced", None)
         st.rerun()
 
-# V3.9.0: daily workflow first, research second, technical internals last.
+# V3.10.0: divide-and-conquer positioning regime is the primary research workflow.
 pages: dict[str, list] = {
     "WORKSPACE": [
         st.Page("pages/dashboard.py", title="Dashboard", icon=":material/home:", default=True),
