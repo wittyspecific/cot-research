@@ -5,29 +5,14 @@ import pandas as pd
 import streamlit as st
 
 from src.config import (
-    COMMERCIAL_RANGE_WEEKS,
-    COT_INDEX_WEEKS,
-    INDEX_LOWER,
-    INDEX_UPPER,
-    NET_LOWER_PERCENTILE,
-    NET_UPPER_PERCENTILE,
-    NET_VALIDATION_WEEKS,
-    RELEASE_ACTIVE_WEEKS,
+    COMMERCIAL_RANGE_WEEKS, COT_INDEX_WEEKS, INDEX_LOWER, INDEX_UPPER,
+    NET_LOWER_PERCENTILE, NET_UPPER_PERCENTILE, NET_VALIDATION_WEEKS, RELEASE_ACTIVE_WEEKS,
 )
-from src.style import (
-    apply_style,
-    context_strip,
-    definition,
-    empty_state,
-    page_header,
-    section_line,
-)
+from src.style import apply_style, context_strip, definition, empty_state, page_header, section_line, terminal_cell
 from src.watchlist import scan_classic_markets
 from src.watchlist_seasonality import calculate_market_20y_multi_seasonality
 
-
 apply_style()
-
 
 MARKET_NAME_DE = {
     "Euro FX": "Euro",
@@ -94,269 +79,181 @@ def market_name_de(value):
     return MARKET_NAME_DE.get(value, value)
 
 
-def current_direction(cot_index: float) -> int:
-    if not np.isfinite(cot_index):
-        return 0
-    if cot_index >= INDEX_UPPER:
-        return 1
-    if cot_index <= INDEX_LOWER:
-        return -1
-    return 0
+def _finite(value):
+    try:
+        x = float(value)
+        return x if np.isfinite(x) else np.nan
+    except (TypeError, ValueError):
+        return np.nan
 
 
-def level_label(value: float, low: float, high: float) -> str:
-    if not np.isfinite(value):
+def _level(value):
+    x = _finite(value)
+    if not np.isfinite(x):
         return "N/V"
-    if value >= high:
+    if x >= NET_UPPER_PERCENTILE:
         return "HOCH"
-    if value <= low:
+    if x <= NET_LOWER_PERCENTILE:
         return "TIEF"
     return "MITTE"
 
 
-def confirmation_flags(row) -> dict:
-    cot = float(row.get("commercial_index", np.nan))
-    comm = float(row.get("commercial_net_percentile", np.nan))
-    nc = float(row.get("noncommercial_net_percentile", np.nan))
-    retail = float(row.get("retail_net_percentile", np.nan))
-    direction = current_direction(cot)
-
+def _release_flags(row) -> dict:
+    direction = int(row.get("cycle_direction", 0) or 0)
+    comm = _finite(row.get("commercial_net_percentile"))
+    nc = _finite(row.get("noncommercial_net_percentile"))
+    retail = _finite(row.get("retail_net_percentile"))
+    release_ok = str(row.get("cycle_phase", "")).upper() == "RELEASE" and direction != 0
     if direction > 0:
-        cot_ok = np.isfinite(cot) and cot >= INDEX_UPPER
         comm_ok = np.isfinite(comm) and comm >= NET_UPPER_PERCENTILE
         nc_ok = np.isfinite(nc) and nc <= NET_LOWER_PERCENTILE
         retail_ok = np.isfinite(retail) and retail <= NET_LOWER_PERCENTILE
     elif direction < 0:
-        cot_ok = np.isfinite(cot) and cot <= INDEX_LOWER
         comm_ok = np.isfinite(comm) and comm <= NET_LOWER_PERCENTILE
         nc_ok = np.isfinite(nc) and nc >= NET_UPPER_PERCENTILE
         retail_ok = np.isfinite(retail) and retail >= NET_UPPER_PERCENTILE
     else:
-        cot_ok = comm_ok = nc_ok = retail_ok = False
-
+        comm_ok = nc_ok = retail_ok = False
+    count = int(release_ok) + int(comm_ok) + int(nc_ok) + int(retail_ok)
     return {
         "direction": direction,
-        "cot_ok": bool(cot_ok),
-        "comm_ok": bool(comm_ok),
-        "nc_ok": bool(nc_ok),
-        "retail_ok": bool(retail_ok),
-        "count": (
-            int(cot_ok)
-            + int(comm_ok)
-            + int(nc_ok)
-            + int(retail_ok)
-        ),
+        "release_ok": release_ok,
+        "comm_ok": comm_ok,
+        "nc_ok": nc_ok,
+        "retail_ok": retail_ok,
+        "count": count,
     }
 
 
-def readable_value(value: float, ok: bool, *, cot: bool = False) -> str:
-    if not np.isfinite(value):
-        return "—"
-
-    mark = "✓" if ok else "–"
-
-    if cot:
-        if value >= INDEX_UPPER:
-            level = "EXTREM HOCH"
-        elif value <= INDEX_LOWER:
-            level = "EXTREM TIEF"
-        else:
-            level = "MITTE"
-    else:
-        level = level_label(value, NET_LOWER_PERCENTILE, NET_UPPER_PERCENTILE)
-
-    return f"{mark} {level} · {value:.1f}"
+def _confirmation_label(count):
+    return (
+        "4/4 Voll" if count >= 4 else
+        "3/4 Stark" if count == 3 else
+        "2/4 Teilweise" if count == 2 else
+        "1/4 Release" if count == 1 else "—"
+    )
 
 
-def confirmation_label(count: int) -> str:
-    if count >= 4:
-        return "4/4 · VOLL"
-    if count == 3:
-        return "3/4 · STARK"
-    if count == 2:
-        return "2/4 · TEILWEISE"
-    return "1/4 · NUR COT"
-
-
-def bias_label(direction: int) -> str:
-    if direction > 0:
-        return "▲ BULLISH"
-    if direction < 0:
-        return "▼ BÄRISCH"
-    return "—"
-
-
-def build_ranking(all_markets: pd.DataFrame) -> pd.DataFrame:
-    rows = []
-
-    for _, row in all_markets.iterrows():
-        flags = confirmation_flags(row)
-
-        # Only current COT extremes enter the simple ranking.
-        # Releases are kept separately below.
-        if flags["direction"] == 0:
-            continue
-
-        cot = float(row["commercial_index"])
-        comm = float(row["commercial_net_percentile"])
-        nc = float(row["noncommercial_net_percentile"])
-        retail = float(row["retail_net_percentile"])
-
-        rows.append({
-            "_asset_class": row["asset_class"],
-            "_market_name": row["market_name"],
-            "_symbol": row["symbol"],
-            "_ticker": row.get("ticker", ""),
-            "_direction": flags["direction"],
-            "_confirmations": flags["count"],
-            "Markt": f"{market_name_de(row['market_name'])} · {row['symbol']}",
-            "Bias": bias_label(flags["direction"]),
-            "COT": readable_value(cot, flags["cot_ok"], cot=True),
-            "Commercials": readable_value(comm, flags["comm_ok"]),
-            "Non-Commercials": readable_value(nc, flags["nc_ok"]),
-            "Retail": readable_value(retail, flags["retail_ok"]),
-            "Bestätigung": confirmation_label(flags["count"]),
-        })
-
-    ranking = pd.DataFrame(rows)
-    if ranking.empty:
-        return ranking
-
-    # No hidden score. More confirmations first, alphabetical inside a tier.
-    ranking = ranking.sort_values(
-        ["_confirmations", "_direction", "Markt"],
-        ascending=[False, False, True],
-    ).reset_index(drop=True)
-
-    return ranking
-
-
-def open_ranked_market(row):
-    handoff = {
-        "asset_class": row["_asset_class"],
-        "market_name": row["_market_name"],
-    }
+def _open_market(row):
+    handoff = {"asset_class": row["asset_class"], "market_name": row["market_name"]}
     st.session_state["selected_market"] = handoff
     st.session_state["_market_context_handoff"] = handoff
     st.switch_page("pages/marktanalyse.py")
 
 
-def render_ranking_table(df: pd.DataFrame, key_prefix: str = "watchlist"):
+def _prepare_release_rows(all_markets: pd.DataFrame) -> pd.DataFrame:
+    if all_markets.empty:
+        return pd.DataFrame()
+    releases = all_markets[all_markets["cycle_phase"].astype(str).str.upper().eq("RELEASE")].copy()
+    if releases.empty:
+        return releases
+    rows = []
+    for _, r in releases.iterrows():
+        flags = _release_flags(r)
+        d = flags["direction"]
+        if not d:
+            continue
+        comm_v = _finite(r.get("commercial_net_percentile"))
+        nc_v = _finite(r.get("noncommercial_net_percentile"))
+        retail_v = _finite(r.get("retail_net_percentile"))
+        rows.append({
+            **r.to_dict(),
+            "_direction": d,
+            "_confirmations": flags["count"],
+            "Signal": "BULLISH" if d > 0 else "BÄRISCH",
+            "Bestätigung": _confirmation_label(flags["count"]),
+            "Commercials": f"{'✓' if flags['comm_ok'] else '–'} {_level(comm_v)} · {comm_v:.1f}",
+            "Non-Commercials": f"{'✓' if flags['nc_ok'] else '–'} {_level(nc_v)} · {nc_v:.1f}",
+            "Retail": f"{'✓' if flags['retail_ok'] else '–'} {_level(retail_v)} · {retail_v:.1f}",
+        })
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return out
+    return out.sort_values(["_confirmations", "_direction", "market_name"], ascending=[False, False, True]).reset_index(drop=True)
+
+
+def _attach_seasonality(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    out = df.copy()
+    records = []
+    for _, r in out.iterrows():
+        records.append(calculate_market_20y_multi_seasonality(
+            ticker=str(r.get("ticker", "")),
+            cot_direction=int(r.get("_direction", 0)),
+        ))
+    season = pd.DataFrame(records)
+    out["Saison"] = season["compact"].values
+    out["_season_support"] = (season["overall_rank"] >= 3).values
+    out["_season_detail"] = season["detail"].values
+    return out
+
+
+def _render_release_table(df: pd.DataFrame, key_prefix: str):
     if df.empty:
         empty_state(
-            "Aktuell befindet sich kein Markt in einem 26W-COT-Extrem.",
-            "Die Watchlist zeigt ausschließlich aktuelle Commercial-Extreme.",
+            "Noch kein aktives Hedge-Release",
+            "Ein Extrem allein ist kein Signal. Die Watchlist wartet auf das Verlassen der Hedge-Zone.",
         )
         return
+    headers = st.columns([1.75, .85, 1.05, 1.2, 1.25, 1.1, 1.05, 1.25], gap="small")
+    for c, t in zip(headers, ["MARKT", "SIGNAL", "RELEASE", "COMMERCIALS", "NON-COMM.", "RETAIL", "BESTÄTIGUNG", "SAISON"]):
+        with c:
+            st.caption(t)
+    for i, r in df.iterrows():
+        cols = st.columns([1.75, .85, 1.05, 1.2, 1.25, 1.1, 1.05, 1.25], gap="small", vertical_alignment="center")
+        with cols[0]:
+            if st.button(f"{market_name_de(r['market_name'])} · {r['symbol']}", key=f"{key_prefix}_{i}", use_container_width=True):
+                _open_market(r)
+        tone = "bull" if int(r["_direction"]) > 0 else "bear"
+        with cols[1]:
+            terminal_cell("↑ BULLISH" if tone == "bull" else "↓ BÄRISCH", tone=tone)
+        with cols[2]:
+            weeks = r.get("weeks_since_release", np.nan)
+            terminal_cell("Jetzt" if pd.isna(weeks) or int(weeks) == 0 else f"vor {int(weeks)}W")
+        with cols[3]:
+            terminal_cell(str(r["Commercials"]))
+        with cols[4]:
+            terminal_cell(str(r["Non-Commercials"]))
+        with cols[5]:
+            terminal_cell(str(r["Retail"]))
+        with cols[6]:
+            terminal_cell(str(r["Bestätigung"]))
+        with cols[7]:
+            terminal_cell(str(r.get("Saison", "—")), str(r.get("_season_detail", ""))[:60])
 
-    h1, h2, h3, h4, h5, h6, h7, h8 = st.columns(
-        [1.75, 0.9, 1.2, 1.25, 1.35, 1.2, 1.2, 1.45],
-        gap="small",
+
+def _render_extreme_watch(all_markets: pd.DataFrame):
+    extreme = (
+        all_markets[all_markets["cycle_phase"].astype(str).str.upper().eq("EXTREME")].copy()
+        if not all_markets.empty else pd.DataFrame()
     )
-    h1.caption("MARKT")
-    h2.caption("BIAS")
-    h3.caption("COT")
-    h4.caption("COMMERCIALS")
-    h5.caption("NON-COMM.")
-    h6.caption("RETAIL")
-    h7.caption("BESTÄTIGUNG")
-    h8.caption("SAISON 20/40/60T")
-
-    for idx, row in df.reset_index(drop=True).iterrows():
-        c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(
-            [1.75, 0.9, 1.2, 1.25, 1.35, 1.2, 1.2, 1.45],
-            gap="small",
-            vertical_alignment="center",
-        )
-
-        with c1:
-            if st.button(
-                f"{row['Markt']}  →",
-                key=f"{key_prefix}_market_{idx}_{row['_symbol']}",
-                width="stretch",
-                help="Direkt zur COT Marktanalyse dieses Marktes",
-            ):
-                open_ranked_market(row)
-
-        with c2:
-            bias = str(row["Bias"])
-            if "BULLISH" in bias:
-                st.markdown(":green[**▲ BULLISH**]")
-            elif "BÄRISCH" in bias:
-                st.markdown(":red[**▼ BÄRISCH**]")
-            else:
-                st.write("—")
-
-        with c3:
-            st.write(row["COT"])
-
-        with c4:
-            st.write(row["Commercials"])
-
-        with c5:
-            st.write(row["Non-Commercials"])
-
-        with c6:
-            st.write(row["Retail"])
-
-        with c7:
-            st.write(row["Bestätigung"])
-
-        with c8:
-            season = str(row.get("Saison 20/40/60T", "20· · 40· · 60·"))
-            detail = str(row.get("_season_detail", ""))
-            st.markdown(f"**{season}**", help=detail or None)
-
-        st.markdown(
-            "<div style='height:1px;background:rgba(255,255,255,0.08);margin:2px 0 8px 0;'></div>",
-            unsafe_allow_html=True,
-        )
-
-
-def render_release_table(all_markets: pd.DataFrame):
-    if all_markets.empty:
+    if extreme.empty:
+        empty_state("Keine aktuellen Commercial-Extreme", "Aktuell steht kein Markt in einer Hedge-Extremzone.")
         return
-
-    releases = all_markets[all_markets["cycle_phase"] == "RELEASE"].copy()
-    if releases.empty:
-        st.caption("Aktuell keine aktiven Releases.")
-        return
-
+    extreme["_abs_extreme"] = (pd.to_numeric(extreme["commercial_index"], errors="coerce") - 50).abs()
+    extreme = extreme.sort_values(["_abs_extreme", "market_name"], ascending=[False, True]).head(24)
     rows = []
-    for _, row in releases.iterrows():
-        direction = int(row.get("cycle_direction", 0) or 0)
-        weeks = row.get("weeks_since_release", np.nan)
+    for _, r in extreme.iterrows():
+        ed = int(r.get("extreme_direction", 0) or 0)
         rows.append({
-            "Markt": f"{market_name_de(row['market_name'])} · {row['symbol']}",
-            "Vorheriger Bias": bias_label(direction),
-            "Release": f"vor {int(weeks)}W" if pd.notna(weeks) else "aktiv",
-            "Netto": {
-                "CONFIRMED": "BESTÄTIGT",
-                "PARTIAL": "TEILWEISE",
-                "UNCONFIRMED": "NICHT BESTÄTIGT",
-            }.get(
-                str(row.get("validation_status")),
-                str(row.get("validation_status")),
-            ),
+            "Markt": f"{market_name_de(r['market_name'])} · {r['symbol']}",
+            "State": "FULL HEDGE" if ed > 0 else "LOW HEDGE",
+            "COT Index": round(_finite(r.get("commercial_index")), 1),
+            "Dauer": f"{int(r.get('extreme_duration', 0) or 0)}W",
+            "Signal": "WAITING FOR RELEASE",
+            "Commercial %ile": round(_finite(r.get("commercial_net_percentile")), 1),
+            "NC %ile": round(_finite(r.get("noncommercial_net_percentile")), 1),
+            "Retail %ile": round(_finite(r.get("retail_net_percentile")), 1),
         })
-
-    st.dataframe(
-        pd.DataFrame(rows),
-        width="stretch",
-        hide_index=True,
-    )
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 page_header(
+    "Research · Scanner",
     "COT Watchlist",
-    "COT Watchlist",
-    "Welche Märkte zeigen aktuell ein klares bullishes oder bärisches COT-Positionierungsbild?",
-    "V3.4.4 · COT + NC-PERZENTIL + SAISON",
-)
-
-st.caption(
-    "Einfache Vorauswahl für Swing- und Position-Trading. "
-    "4/4 bis 1/4 zeigen die Zahl der erfüllten Positionierungsbedingungen. Non-Commercials sind dabei eine zusätzliche, aber nicht statistisch unabhängige Kontextbestätigung."
+    "Aktive Hedge-Releases zuerst. Full-Hedge-Extreme bleiben als Wartezustand sichtbar.",
+    "V3.9.0 · STATE ≠ SIGNAL",
 )
 
 with st.spinner("CFTC-Märkte werden geprüft …"):
@@ -372,167 +269,63 @@ with st.spinner("CFTC-Märkte werden geprüft …"):
     )
 
 all_markets = scan["all_markets"].copy()
-ranking = build_ranking(all_markets)
+signals = _prepare_release_rows(all_markets)
+if not signals.empty:
+    with st.spinner("Saisonalität der aktiven Releases wird geprüft …"):
+        signals = _attach_seasonality(signals)
 
-if not ranking.empty:
-    seasonality_rows = []
-    with st.spinner("20J / 20-40-60T-Saisonalität der COT-Extreme wird geprüft …"):
-        for _, market_row in ranking.iterrows():
-            seasonality_rows.append(
-                calculate_market_20y_multi_seasonality(
-                    ticker=str(market_row.get("_ticker", "")),
-                    cot_direction=int(market_row["_direction"]),
-                )
-            )
+if all_markets.empty:
+    full_hedge_count = 0
+else:
+    phase = all_markets["cycle_phase"].astype(str).str.upper()
+    extreme_direction = pd.to_numeric(all_markets.get("extreme_direction"), errors="coerce").fillna(0)
+    full_hedge_count = int((phase.eq("EXTREME") & extreme_direction.gt(0)).sum())
 
-    seasonality_df = pd.DataFrame(seasonality_rows)
-    ranking["Saison 20/40/60T"] = seasonality_df["compact"].values
-    ranking["_season_support"] = (seasonality_df["overall_rank"] >= 3).astype(bool).values
-    ranking["_season_sort"] = seasonality_df["overall_rank"].astype(int).values
-    ranking["_season_detail"] = seasonality_df["detail"].values
+release_count = len(signals)
+fully_confirmed = int((signals.get("_confirmations", pd.Series(dtype=int)) == 4).sum()) if not signals.empty else 0
+season_supported = int(signals.get("_season_support", pd.Series(dtype=bool)).sum()) if not signals.empty else 0
 
-    # Primary hierarchy remains the transparent COT confirmation count.
-    # Seasonality only orders markets inside the same 4/4, 3/4, 2/4 or 1/4 tier.
-    ranking = ranking.sort_values(
-        ["_confirmations", "_season_sort", "_direction", "Markt"],
-        ascending=[False, False, False, True],
-    ).reset_index(drop=True)
-
-fully_confirmed = (
-    int((ranking["_confirmations"] == 4).sum())
-    if not ranking.empty else 0
-)
-bullish_count = (
-    int((ranking["_direction"] > 0).sum())
-    if not ranking.empty else 0
-)
-bearish_count = (
-    int((ranking["_direction"] < 0).sum())
-    if not ranking.empty else 0
-)
-season_supported_count = (
-    int(ranking["_season_support"].sum())
-    if not ranking.empty and "_season_support" in ranking.columns else 0
-)
-
-context_strip(
-    [
-        ("COT-Report", de_date(scan["latest_report"])),
-        ("COT-Extreme", str(len(ranking))),
-        ("4/4 bestätigt", str(fully_confirmed)),
-        ("Saison unterstützt", str(season_supported_count)),
-    ]
-)
+context_strip([
+    ("COT-Report", de_date(scan["latest_report"])),
+    ("Aktive Releases", str(release_count)),
+    ("4/4 bestätigt", str(fully_confirmed)),
+    ("Full Hedge Watch", str(full_hedge_count)),
+])
 
 definition(
-    f"4/4 = COT + Commercial-Netto + Non-Commercial-Netto + Retail-Netto passen "
-    f"zum selben Reversal-Bias. Bei bullish muss NC historisch tief, bei bearish "
-    f"historisch hoch liegen. Commercials und Legacy NC sind mechanisch gekoppelt "
-    f"und deshalb nicht als unabhängige Signale zu verstehen. Saison 20/40/60T "
-    f"bleibt zusätzliche Confluence und verändert die 1/4–4/4-Bestätigung nicht."
+    "COT 100 bedeutet FULL HEDGE / obere Extremzone – noch kein bullishes Signal. "
+    "Erst das Verlassen dieser Zone erzeugt ein bullishes Hedge-Release. "
+    "Analog entsteht ein bärisches Signal erst beim Verlassen der unteren Extremzone."
 )
 
-section_line(
-    "Aktuelle COT-Extreme",
-    "4/4 zuerst · NC-Perzentil + Saison als zusätzliche Confluence",
-)
+section_line("Aktive Signale", "Hedge-Release zuerst · Bestätigung danach")
+if not signals.empty:
+    tab_all, tab_bull, tab_bear = st.tabs(["Alle", "Bullish", "Bärisch"])
+    with tab_all:
+        _render_release_table(signals, "sig_all")
+    with tab_bull:
+        _render_release_table(signals[signals["_direction"] > 0].reset_index(drop=True), "sig_bull")
+    with tab_bear:
+        _render_release_table(signals[signals["_direction"] < 0].reset_index(drop=True), "sig_bear")
+else:
+    _render_release_table(signals, "sig_none")
 
-st.caption(
-    "Auf einen Marktnamen klicken → direkt zur vollständigen COT Marktanalyse. "
-    "Saison = letzte 20 abgeschlossene Jahre / nächste 20, 40 und 60 Handelstage."
-)
+section_line("Full Hedge Watch", "Extremzustände ohne Richtungs-Signal")
+_render_extreme_watch(all_markets)
 
-only_season_supported = st.toggle(
-    "Nur Märkte mit überwiegend/stabil saisonaler Unterstützung anzeigen",
-    value=False,
-)
+with st.expander("Signal-Logik verstehen", expanded=False):
+    st.markdown(f"""
+**Obere Extremzone (COT ≥ {INDEX_UPPER})**
+State = **FULL HEDGE**. Noch kein bullishes Signal.
+Erst beim Verlassen → **BULLISH RELEASE**.
 
-ranking_view = ranking.copy()
-if only_season_supported and not ranking_view.empty:
-    ranking_view = ranking_view[
-        ranking_view["_season_support"]
-    ].reset_index(drop=True)
+**Untere Extremzone (COT ≤ {INDEX_LOWER})**
+State = **LOW HEDGE / untere Extremzone**. Noch kein bärisches Signal.
+Erst beim Verlassen → **BEARISH RELEASE**.
 
-tab_all, tab_bull, tab_bear = st.tabs(["Alle", "Bullish", "Bearish"])
-
-with tab_all:
-    render_ranking_table(ranking_view, key_prefix="all")
-
-with tab_bull:
-    bull = (
-        ranking_view[ranking_view["_direction"] > 0].copy()
-        if not ranking_view.empty else ranking_view
-    )
-    render_ranking_table(bull, key_prefix="bull")
-
-with tab_bear:
-    bear = (
-        ranking_view[ranking_view["_direction"] < 0].copy()
-        if not ranking_view.empty else ranking_view
-    )
-    render_ranking_table(bear, key_prefix="bear")
-
-
-with st.expander("Wie wird Bullish / Bearish bestätigt?", expanded=False):
-    st.markdown(
-        f"""
-**Bullish**
-
-- COT-Index: **≥ {INDEX_UPPER}**
-- Commercial-Netto: **≥ {NET_UPPER_PERCENTILE}. Perzentil**
-- Retail-Netto: **≤ {NET_LOWER_PERCENTILE}. Perzentil**
-
-**Bearish**
-
-- COT-Index: **≤ {INDEX_LOWER}**
-- Commercial-Netto: **≤ {NET_LOWER_PERCENTILE}. Perzentil**
-- Retail-Netto: **≥ {NET_UPPER_PERCENTILE}. Perzentil**
-
-Die **Range ist bewusst kein Teil dieses Rankings**. Sie bleibt in der
-Marktanalyse als zusätzlicher Kontext sichtbar. So wird die Commercial-
-Extreminformation nicht mehrfach als vermeintlich unabhängige Bestätigung gezählt.
-
-**Saison 20 / 40 / 60T**
-
-- historische Basis: letzte **20 abgeschlossene Jahre**
-- Horizonte: nächste **20, 40 und 60 Handelstage**
-- `20✓ · 40✓ · 60✓` = saisonal über alle drei Horizonte unterstützt
-- `20✓ · 40✓ · 60✕` = kurzfristig/mittelfristig unterstützt, längerfristig gegenläufig
-- `20✕ · 40✕ · 60✕` = saisonal auf allen drei Horizonten gegenläufig
-- `·` = nicht genügend verlässliche Historie
-
-Die Horizonte helfen bei der Einschätzung der **zeitlichen Persistenz**, sind aber keine automatische Exit- oder Haltedauerregel.
-- `— GEMISCHT` = kein klarer saisonaler Richtungsvorteil
-- `— N/V` = nicht genügend verlässliche Preishistorie
-
-Die Saison ist eine **separate Confluence**. Ein 3/4-Markt wird durch eine
-positive Saison nicht zu 4/4.
-"""
-    )
-
-
-with st.expander("Aktive Releases", expanded=False):
-    st.caption(
-        "Releases stehen separat, weil der aktuelle COT-Index das Extrem bereits verlassen hat "
-        "und daher nicht sinnvoll in das aktuelle 3-Bedingungen-Ranking gehört."
-    )
-    render_release_table(all_markets)
-
+Commercial-Netto, Non-Commercial-Netto und Retail-Netto bestätigen anschließend den Release. Saison 20/40/60T bleibt separate Confluence.
+""")
 
 if not scan["errors"].empty:
-    with st.expander(
-        f"Datenprobleme · {len(scan['errors'])} Märkte nicht geladen",
-        expanded=False,
-    ):
-        err = scan["errors"].copy()
-        err["Markt"] = err["market_name"].map(market_name_de)
-        err = err.rename(columns={
-            "asset_class": "Assetklasse",
-            "symbol": "Symbol",
-            "error": "Fehler",
-        })
-        st.dataframe(
-            err[["Markt", "Symbol", "Assetklasse", "Fehler"]],
-            width="stretch",
-            hide_index=True,
-        )
+    with st.expander(f"Datenprobleme · {len(scan['errors'])} Märkte", expanded=False):
+        st.dataframe(scan["errors"], use_container_width=True, hide_index=True)

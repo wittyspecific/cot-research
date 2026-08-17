@@ -28,13 +28,13 @@ def _position(symbol, side, risk_price, sl, tick=0.01, tick_value=1.0, volume=1.
 def test_navigation_contains_risk_cockpit_before_detail_page():
     text = (ROOT / "app.py").read_text()
     assert 'pages/risk_cockpit.py' in text
-    assert 'title="Risk Cockpit"' in text
+    assert 'title="FTMO Risk"' in text
     assert text.index('pages/risk_cockpit.py') < text.index('pages/portfolio_risk.py')
 
 
 def test_cockpit_page_is_intentionally_compact():
     text = (ROOT / "pages" / "risk_cockpit.py").read_text()
-    assert 'Darf aktuell neues Risiko ins Portfolio?' in text
+    assert 'Aktuelle Portfolio-Auslastung und Risikolimits auf einen Blick.' in text
     assert 'Die 3 größten Risikotreiber' in text
     assert 'Risk Capacity nach Bereich' in text
     assert 'Alle Risk-Details & Pre-Trade-Rechner öffnen' in text

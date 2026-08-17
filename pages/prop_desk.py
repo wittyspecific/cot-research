@@ -84,10 +84,10 @@ except (JournalGatewayError, ValueError) as exc:
     st.stop()
 
 page_header(
-    "Trading · Simulation",
+    "Trading · Performance",
     "Prop Desk",
-    "Virtuelles Trading-Konto pro Trader: Balance, Equity, Floating/Realized P&L, Drawdown und Performance — ohne reale Orderausführung.",
-    "V3.8.1.5.1 · MARKET AUTO-FILL & PRICE UNITS",
+    "Equity, Risiko und Performance deiner Simulationen auf einen Blick.",
+    "V3.9.0 · PROP WORKSPACE",
 )
 
 if is_admin and not traders.empty:
@@ -166,7 +166,7 @@ if not curve.empty:
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=curve["time_utc"], y=curve["equity"], mode="lines+markers", name="Equity"))
     fig.update_layout(
-        template="plotly_dark",
+        template="plotly_white",
         height=360,
         margin=dict(l=10, r=20, t=15, b=10),
         xaxis_title=None,

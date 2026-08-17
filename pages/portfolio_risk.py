@@ -153,10 +153,10 @@ def _risk_controls(base: FTMORiskConfig) -> FTMORiskConfig:
 
 
 page_header(
-    "Portfolio · FTMO Risk",
+    "Admin · Risiko",
     "FTMO Portfolio & Risk Engine",
-    "Wie viel CFD-Risiko ist im aktuellen $100k Swing-Konto bereits offen und wie viel darf ein neuer Trade noch hinzufügen?",
-    "V3.6.0.1 · FULL MT5 CFD CATALOG",
+    "Portfolio-Risiko, Limits und verbleibenden Spielraum prüfen.",
+    "V3.9.0 · RISK ENGINE",
 )
 
 st.caption(

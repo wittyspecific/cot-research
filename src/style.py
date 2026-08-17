@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from html import escape
@@ -11,35 +10,35 @@ import streamlit.components.v1 as components
 
 
 # ---------------------------------------------------------------------------
-# VISUAL TOKENS · single source of truth for the UI
+# V3.9.0 UI TOKENS · minimalist research / trading workspace
 # ---------------------------------------------------------------------------
 COLORS = {
-    "bg": "#0B1320",
-    "surface": "#121D2E",
-    "surface_alt": "#17243A",
-    "surface_deep": "#0F1928",
-    "line": "#35485F",
-    "line_soft": "#26384D",
-    "text": "#F3F7FC",
-    "muted": "#B3C0D0",
-    "muted_2": "#8596AC",
-    "accent": "#7EB9E6",
-    "bull": "#78D2A0",
-    "bear": "#EB8A8A",
+    "bg": "#F6F8FB",
+    "surface": "#FFFFFF",
+    "surface_alt": "#F9FAFB",
+    "surface_deep": "#F3F6FA",
+    "line": "#E4E9F0",
+    "line_soft": "#EEF1F5",
+    "text": "#111827",
+    "muted": "#6B7280",
+    "muted_2": "#9CA3AF",
+    "accent": "#16A34A",
+    "accent_soft": "#ECFDF3",
+    "bull": "#16A34A",
+    "bear": "#DC2626",
+    "warn": "#D97706",
+    "info": "#2563EB",
 }
 
-# Semantic chart palette. These colors stay fixed across all charts so the
-# same market participant is visually recognizable everywhere. The palette is
-# deliberately high-contrast on the dark dashboard background.
 CHART_COLORS = {
-    "commercial": "#19C7FF",       # bright cyan
-    "noncommercial": "#FF9D00",    # amber / orange
-    "retail": "#9BE600",           # lime green
-    "speculative": "#B887FF",      # violet
-    "price": "#F2F6FC",            # near-white
-    "range_high": "#50D6A4",       # mint
-    "range_low": "#FF7474",        # soft red
-    "reference": "#7F93AA",        # muted blue-grey
+    "commercial": "#16A34A",
+    "noncommercial": "#2563EB",
+    "retail": "#F59E0B",
+    "speculative": "#7C3AED",
+    "price": "#111827",
+    "range_high": "#22C55E",
+    "range_low": "#EF4444",
+    "reference": "#94A3B8",
 }
 
 CHART_COLORWAY = [
@@ -47,27 +46,23 @@ CHART_COLORWAY = [
     CHART_COLORS["noncommercial"],
     CHART_COLORS["retail"],
     CHART_COLORS["speculative"],
-    "#FFD166",
-    "#4DD4AC",
-    "#EF7FBF",
-    "#7DA6FF",
+    "#0891B2",
+    "#DB2777",
+    "#4F46E5",
+    "#65A30D",
 ]
 
 SPACING = {
-    "page_top": "1.8rem",
+    "page_top": "1.55rem",
     "page_bottom": "4rem",
-    "section": "2rem",
-    "row_y": "0.82rem",
-    "row_x": "0.9rem",
-    "tight": "0.45rem",
+    "section": "1.55rem",
 }
 
 TYPE = {
-    "body": "0.94rem",
-    "body_small": "0.81rem",
-    "metric": "1.22rem",
-    "title": "2.05rem",
-    "tracking": "0.10em",
+    "body": "0.91rem",
+    "body_small": "0.78rem",
+    "metric": "1.45rem",
+    "title": "2.0rem",
 }
 
 
@@ -83,19 +78,15 @@ def _css_vars() -> str:
         "--muted": COLORS["muted"],
         "--muted-2": COLORS["muted_2"],
         "--accent": COLORS["accent"],
+        "--accent-soft": COLORS["accent_soft"],
         "--bull": COLORS["bull"],
         "--bear": COLORS["bear"],
-        "--space-page-top": SPACING["page_top"],
-        "--space-page-bottom": SPACING["page_bottom"],
-        "--space-section": SPACING["section"],
-        "--space-row-y": SPACING["row_y"],
-        "--space-row-x": SPACING["row_x"],
-        "--space-tight": SPACING["tight"],
+        "--warn": COLORS["warn"],
+        "--info": COLORS["info"],
         "--font-body": TYPE["body"],
         "--font-small": TYPE["body_small"],
         "--font-metric": TYPE["metric"],
         "--font-title": TYPE["title"],
-        "--tracking": TYPE["tracking"],
     }
     return "\n".join(f"{key}:{value};" for key, value in tokens.items())
 
@@ -104,510 +95,150 @@ def apply_style():
     st.markdown(
         f"""
         <style>
-        :root {{
-            {_css_vars()}
-        }}
+        :root {{ {_css_vars()} }}
 
         html, body, [class*="css"] {{
+            font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
             font-variant-numeric: tabular-nums lining-nums;
         }}
 
-        .stApp {{
-            background: var(--bg);
-            color: var(--text);
-        }}
+        .stApp {{ background: var(--bg); color: var(--text); }}
+        .block-container {{ max-width: 1480px; padding-top: 1.55rem; padding-bottom: 4rem; }}
 
         [data-testid="stSidebar"] {{
-            background: var(--surface);
+            background: #FFFFFF;
             border-right: 1px solid var(--line);
+            min-width: 232px;
         }}
-
+        [data-testid="stSidebar"] > div:first-child {{ padding-top: .75rem; }}
         [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
-        [data-testid="stSidebar"] label {{
-            color: var(--muted) !important;
-        }}
-
-        [data-testid="stSidebar"] * {{
-            font-size: var(--font-body);
-        }}
-
-        .block-container {{
-            max-width: 1440px;
-            padding-top: var(--space-page-top);
-            padding-bottom: var(--space-page-bottom);
+        [data-testid="stSidebar"] label {{ color: var(--muted) !important; }}
+        [data-testid="stSidebarNav"] span {{ font-size: .88rem !important; font-weight: 520; }}
+        [data-testid="stSidebarNav"] a {{ border-radius: 9px !important; margin: 2px 8px !important; }}
+        [data-testid="stSidebarNav"] a[aria-current="page"] {{
+            background: var(--accent-soft) !important;
+            color: var(--accent) !important;
+            font-weight: 650 !important;
         }}
 
         h1 {{
             color: var(--text) !important;
             font-size: var(--font-title) !important;
-            font-weight: 620 !important;
-            letter-spacing: -0.025em !important;
+            line-height: 1.15 !important;
+            font-weight: 700 !important;
+            letter-spacing: -0.035em !important;
             margin: 0 !important;
         }}
+        h2, h3, h4 {{ color: var(--text) !important; text-transform: none !important; letter-spacing: -0.012em !important; }}
+        h2 {{ font-size: 1.18rem !important; font-weight: 680 !important; margin-top: 1.45rem !important; }}
+        h3 {{ font-size: 1.02rem !important; font-weight: 650 !important; }}
+        p, li, label {{ font-size: var(--font-body); line-height: 1.5; color: var(--text); }}
+        [data-testid="stCaptionContainer"] p {{ color: var(--muted) !important; font-size: var(--font-small) !important; }}
+        a {{ color: var(--accent) !important; }}
+        hr {{ border-color: var(--line-soft) !important; }}
 
-        h2, h3, h4 {{
-            color: var(--muted) !important;
-            text-transform: uppercase;
-            letter-spacing: var(--tracking) !important;
+        [data-testid="stButton"] button,
+        [data-testid="stFormSubmitButton"] button,
+        [data-testid="stPageLink"] a {{
+            border-radius: 9px !important;
+            box-shadow: none !important;
+            min-height: 2.45rem;
             font-weight: 620 !important;
+            font-size: .83rem !important;
+        }}
+        [data-testid="stButton"] button,
+        [data-testid="stPageLink"] a {{
+            background: #FFFFFF !important;
+            color: var(--text) !important;
+            border: 1px solid var(--line) !important;
+        }}
+        [data-testid="stButton"] button:hover,
+        [data-testid="stPageLink"] a:hover {{ border-color: #B7E4C4 !important; color: var(--accent) !important; }}
+        [data-testid="stFormSubmitButton"] button[kind="primary"],
+        [data-testid="stButton"] button[kind="primary"] {{
+            background: var(--accent) !important;
+            color: white !important;
+            border-color: var(--accent) !important;
         }}
 
-        h2 {{
-            font-size: 0.82rem !important;
-            margin-top: var(--space-section) !important;
-        }}
-
-        h3 {{
-            font-size: 0.76rem !important;
-            margin-top: var(--space-section) !important;
-        }}
-
-        h4 {{
-            font-size: 0.72rem !important;
-            margin-top: 1.2rem !important;
-        }}
-
-        p, li, label {{
-            font-size: var(--font-body);
-            line-height: 1.62;
-        }}
-
-        [data-testid="stCaptionContainer"] p {{
-            color: var(--muted) !important;
-            font-size: var(--font-small) !important;
-            line-height: 1.5;
-        }}
-
-        a {{
-            color: var(--accent) !important;
-        }}
-
-        hr {{
-            border-color: var(--line-soft) !important;
-        }}
-
-        /* No rounded consumer-app styling. */
-        button,
         [data-baseweb="select"] > div,
         [data-baseweb="input"] > div,
-        input,
-        textarea,
-        [data-testid="stExpander"] details,
-        [data-testid="stAlert"] {{
-            border-radius: 0 !important;
-            box-shadow: none !important;
-        }}
+        input, textarea {{ border-radius: 9px !important; border-color: var(--line) !important; background: #FFFFFF !important; }}
 
-        [data-testid="stButton"] button {{
-            background: transparent !important;
-            color: var(--text) !important;
-            border: 1px solid var(--line) !important;
-            min-height: 2.10rem;
-            font-size: var(--font-small) !important;
-            font-weight: 620 !important;
-            letter-spacing: 0.01em;
-            padding: 0.30rem 0.48rem !important;
-        }}
-
-        [data-testid="stButton"] button:hover {{
-            border-color: var(--accent) !important;
-            color: var(--accent) !important;
-        }}
-
-        [data-testid="stPageLink"] a {{
-            border: 1px solid var(--line) !important;
-            border-radius: 0 !important;
-            background: var(--surface-alt) !important;
-            min-height: 2.55rem;
-            padding: 0.58rem 0.78rem !important;
-        }}
-
-        [data-testid="stPageLink"] a:hover {{
-            border-color: var(--accent) !important;
-        }}
+        [data-testid="stAlert"] {{ border-radius: 10px !important; border: 1px solid var(--line) !important; box-shadow: none !important; }}
+        [data-testid="stExpander"] details {{ border: 1px solid var(--line) !important; border-radius: 10px !important; background: #FFFFFF !important; }}
 
         .terminal-header {{
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
-            gap: 1rem;
-            align-items: end;
-            border-bottom: 1px solid var(--line);
-            padding-bottom: 0.8rem;
-            margin-bottom: 0.55rem;
+            display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem;
+            padding: .2rem 0 .75rem 0; margin-bottom: .25rem;
         }}
-
-        .terminal-eyebrow {{
-            color: var(--muted-2);
-            font-size: 0.70rem;
-            font-weight: 650;
-            letter-spacing: 0.18em;
-            text-transform: uppercase;
-            margin-bottom: 0.28rem;
-        }}
-
-        .terminal-build {{
-            color: var(--muted);
-            border-left: 1px solid var(--line);
-            padding-left: 0.8rem;
-            font-size: 0.67rem;
-            letter-spacing: 0.11em;
-            text-transform: uppercase;
-            white-space: nowrap;
-        }}
-
-        .page-question {{
-            display: flex;
-            gap: 0.55rem;
-            align-items: baseline;
-            color: var(--text);
-            font-size: 1.02rem;
-            padding: 0.42rem 0 0.82rem 0;
-            margin-bottom: 0.35rem;
-        }}
-
-        .page-question span {{
-            color: var(--accent);
-            font-size: 0.65rem;
-            font-weight: 700;
-            letter-spacing: 0.15em;
-            text-transform: uppercase;
-            white-space: nowrap;
-        }}
+        .terminal-eyebrow {{ color: var(--muted); font-size: .68rem; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; margin-bottom: .28rem; }}
+        .terminal-build {{ color: var(--muted-2); font-size: .66rem; white-space: nowrap; }}
+        .page-question {{ color: var(--muted); font-size: .88rem; margin-bottom: .95rem; }}
+        .page-question span {{ display: none; }}
 
         .context-strip {{
-            display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-            border-top: 1px solid var(--line);
-            border-bottom: 1px solid var(--line);
-            margin: 1rem 0 1.25rem 0;
-            background: var(--surface);
+            display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .75rem;
+            margin: .8rem 0 1.15rem 0;
         }}
-
-        .context-item {{
-            min-width: 0;
-            padding: 0.78rem 0.85rem;
-            border-right: 1px solid var(--line-soft);
-        }}
-
-        .context-item:last-child {{
-            border-right: 0;
-        }}
-
-        .context-label {{
-            color: var(--muted-2);
-            font-size: 0.64rem;
-            letter-spacing: 0.13em;
-            text-transform: uppercase;
-            margin-bottom: 0.18rem;
-        }}
-
-        .context-value {{
-            color: var(--text);
-            font-size: 1.02rem;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }}
+        .context-item {{ background: #FFFFFF; border: 1px solid var(--line); border-radius: 11px; padding: .85rem .95rem; min-width: 0; }}
+        .context-label {{ color: var(--muted); font-size: .67rem; font-weight: 650; margin-bottom: .35rem; }}
+        .context-value {{ color: var(--text); font-size: 1.08rem; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
 
         .stage-summary {{
-            border-top: 1px solid var(--line);
-            margin: 0.9rem 0 1.55rem 0;
+            display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: .75rem; margin: .85rem 0 1.25rem 0;
         }}
+        .stage-row {{ background: #FFFFFF; border: 1px solid var(--line); border-radius: 11px; padding: .85rem .9rem; min-height: 132px; }}
+        .stage-number {{ color: var(--muted-2); font-size: .62rem; font-weight: 700; text-transform: uppercase; margin-right: .35rem; }}
+        .stage-label {{ color: var(--muted); font-size: .67rem; font-weight: 650; }}
+        .stage-primary {{ color: var(--text); font-size: 1.02rem; font-weight: 680; margin: .62rem 0 .36rem; }}
+        .stage-detail {{ color: var(--muted); font-size: .75rem; line-height: 1.42; }}
+        .direction-bull {{ color: var(--bull) !important; }}
+        .direction-bear {{ color: var(--bear) !important; }}
 
-        .stage-row {{
-            display: grid;
-            grid-template-columns: 150px minmax(250px, 0.9fr) minmax(340px, 1.35fr);
-            gap: 1rem;
-            align-items: center;
-            min-height: 64px;
-            padding: var(--space-row-y) var(--space-row-x);
-            border-bottom: 1px solid var(--line-soft);
-            background: var(--surface);
-        }}
+        .section-line {{ display:flex; justify-content:space-between; gap:1rem; align-items:baseline; margin:1.55rem 0 .65rem; }}
+        .section-line .name {{ color:var(--text); font-size:1rem; font-weight:680; }}
+        .section-line .meta {{ color:var(--muted); font-size:.74rem; }}
+        .definition {{ color: var(--muted); background:#FFFFFF; border:1px solid var(--line); border-radius:9px; padding:.7rem .8rem; margin:.25rem 0 .75rem; font-size:.78rem; line-height:1.45; }}
+        .empty-state {{ background:#FFFFFF; border:1px solid var(--line); border-radius:11px; padding:1.05rem; margin:.5rem 0 1rem; }}
+        .empty-state strong {{ display:block; color:var(--text); font-size:.88rem; margin-bottom:.2rem; }}
+        .empty-state span {{ color:var(--muted); font-size:.78rem; }}
 
-        .stage-number {{
-            color: var(--accent);
-            font-size: 0.64rem;
-            font-weight: 700;
-            letter-spacing: 0.14em;
-            text-transform: uppercase;
-            margin-right: 0.35rem;
-        }}
+        .metric {{ background:#FFFFFF; border:1px solid var(--line); border-radius:11px; min-height:108px; padding:.85rem .9rem; }}
+        .metric small {{ display:block; color:var(--muted); font-size:.68rem; font-weight:620; margin-bottom:.45rem; }}
+        .metric .value {{ color:var(--text); font-size:var(--font-metric); font-weight:720; line-height:1.1; letter-spacing:-.025em; }}
+        .metric .note {{ color:var(--muted); font-size:.73rem; margin-top:.38rem; line-height:1.35; }}
 
-        .stage-label {{
-            color: var(--muted);
-            font-size: 0.67rem;
-            font-weight: 650;
-            letter-spacing: 0.11em;
-            text-transform: uppercase;
-        }}
+        .signalbox {{ background:#FFFFFF; border:1px solid var(--line); border-radius:11px; padding:.85rem; min-height:185px; }}
+        .signalbox small {{ color:var(--muted); font-size:.67rem; }}
+        .signalbox .signal {{ color:var(--text); font-size:1.2rem; font-weight:700; margin:.42rem 0 .6rem; }}
+        .signalbox p {{ color:var(--muted); font-size:.76rem; line-height:1.45; }}
 
-        .stage-primary {{
-            color: var(--text);
-            font-size: 1.02rem;
-            font-weight: 570;
-        }}
+        .terminal-cell {{ min-height:48px; display:flex; flex-direction:column; justify-content:center; }}
+        .terminal-cell .primary {{ color:var(--text); font-weight:620; font-size:.84rem; }}
+        .terminal-cell .secondary {{ color:var(--muted); font-size:.72rem; margin-top:.12rem; }}
+        .terminal-table-head {{ color:var(--muted); font-size:.66rem; font-weight:700; }}
+        .terminal-row-divider {{ height:1px; background:var(--line-soft); margin:.12rem 0 .4rem; }}
+        .terminal-row-meta {{ color:var(--muted); font-size:.71rem; }}
+        .watch-row-note {{ color:var(--muted); font-size:.72rem; }}
 
-        .stage-detail {{
-            color: var(--muted);
-            font-size: var(--font-small);
-            line-height: 1.46;
-        }}
+        div[data-testid="stDataFrame"], div[data-testid="stPlotlyChart"] {{ background:#FFFFFF !important; border:1px solid var(--line) !important; border-radius:11px !important; overflow:hidden; }}
+        div[data-testid="stTabs"] button {{ font-size:.76rem; font-weight:600; color:var(--muted); padding:.45rem .65rem; }}
+        div[data-testid="stTabs"] button[aria-selected="true"] {{ color:var(--accent) !important; border-bottom-color:var(--accent) !important; }}
 
-        .direction-bull {{
-            color: var(--bull) !important;
-        }}
+        .cot-brand {{ padding:.35rem .35rem .9rem; border-bottom:1px solid var(--line-soft); margin-bottom:.45rem; }}
+        .cot-brand-row {{ display:flex; align-items:center; gap:.6rem; }}
+        .cot-logo {{ width:31px; height:31px; border-radius:8px; background:var(--accent); color:#fff; display:flex; align-items:center; justify-content:center; font-size:1.05rem; font-weight:800; }}
+        .cot-brand-title {{ color:var(--text); font-size:.9rem; font-weight:760; line-height:1.05; }}
+        .cot-brand-sub {{ color:var(--muted); font-size:.65rem; margin-top:.13rem; }}
+        .cot-user-card {{ background:var(--surface-alt); border:1px solid var(--line); border-radius:10px; padding:.65rem .7rem; margin:.6rem 0 .5rem; }}
+        .cot-user-name {{ color:var(--text); font-size:.82rem; font-weight:650; }}
+        .cot-user-meta {{ color:var(--muted); font-size:.67rem; margin-top:.12rem; }}
 
-        .direction-bear {{
-            color: var(--bear) !important;
-        }}
-
-        .section-line {{
-            display: flex;
-            justify-content: space-between;
-            gap: 1rem;
-            align-items: baseline;
-            border-bottom: 1px solid var(--line);
-            padding: 0 0 0.38rem 0;
-            margin: var(--space-section) 0 0.58rem 0;
-        }}
-
-        .section-line .name {{
-            color: var(--muted);
-            font-size: 0.73rem;
-            font-weight: 700;
-            letter-spacing: 0.13em;
-            text-transform: uppercase;
-        }}
-
-        .section-line .meta {{
-            color: var(--muted-2);
-            font-size: 0.73rem;
-        }}
-
-        .definition {{
-            color: var(--muted);
-            border-left: 2px solid var(--line);
-            padding: 0.25rem 0 0.25rem 0.62rem;
-            margin: 0.2rem 0 0.72rem 0;
-            font-size: var(--font-small);
-            line-height: 1.5;
-        }}
-
-        .empty-state {{
-            background: var(--surface);
-            border-top: 1px solid var(--line);
-            border-bottom: 1px solid var(--line);
-            padding: 1.15rem 0.8rem;
-            margin: 0.55rem 0 1rem 0;
-        }}
-
-        .empty-state strong {{
-            display: block;
-            color: var(--text);
-            font-size: 0.84rem;
-            font-weight: 560;
-            margin-bottom: 0.18rem;
-        }}
-
-        .empty-state span {{
-            color: var(--muted);
-            font-size: var(--font-small);
-        }}
-
-        .metric {{
-            background: var(--surface);
-            border-top: 1px solid var(--line);
-            border-bottom: 1px solid var(--line);
-            min-height: 98px;
-            padding: 0.72rem 0.72rem;
-        }}
-
-        .metric small {{
-            display: block;
-            color: var(--muted-2);
-            font-size: 0.64rem;
-            font-weight: 650;
-            letter-spacing: 0.11em;
-            text-transform: uppercase;
-            margin-bottom: 0.38rem;
-        }}
-
-        .metric .value {{
-            color: var(--text);
-            font-size: var(--font-metric);
-            font-weight: 570;
-            line-height: 1.18;
-        }}
-
-        .metric .note {{
-            color: var(--muted);
-            font-size: 0.73rem;
-            margin-top: 0.28rem;
-            line-height: 1.4;
-        }}
-
-        .signalbox {{
-            background: var(--surface);
-            border-top: 1px solid var(--line);
-            border-bottom: 1px solid var(--line);
-            padding: 0.8rem 0.75rem;
-            min-height: 220px;
-        }}
-
-        .signalbox small {{
-            color: var(--muted-2);
-            letter-spacing: 0.12em;
-            font-size: 0.64rem;
-        }}
-
-        .signalbox .signal {{
-            color: var(--text);
-            font-size: var(--font-metric);
-            font-weight: 570;
-            margin: 0.45rem 0 0.7rem 0;
-        }}
-
-        .signalbox .signal-small {{
-            font-size: 1.02rem;
-        }}
-
-        .signalbox p {{
-            color: var(--muted);
-            line-height: 1.62;
-            font-size: var(--font-small);
-        }}
-
-        .watch-row {{
-            background: var(--surface-deep);
-            border-bottom: 1px solid var(--line-soft);
-            padding: 0.16rem 0;
-        }}
-
-        .watch-row-note {{
-            color: var(--muted);
-            font-size: 0.73rem;
-            margin: -0.08rem 0 0.38rem 0.2rem;
-        }}
-
-        div[data-testid="stDataFrame"],
-        div[data-testid="stPlotlyChart"] {{
-            border: 1px solid var(--line) !important;
-            background: var(--surface) !important;
-        }}
-
-        div[data-testid="stDataFrame"] {{
-            font-variant-numeric: tabular-nums;
-        }}
-
-        div[data-testid="stTabs"] button {{
-            text-transform: uppercase;
-            letter-spacing: 0.055em;
-            font-size: 0.70rem;
-            font-weight: 650;
-            color: var(--muted);
-            padding-left: 0.55rem;
-            padding-right: 0.55rem;
-        }}
-
-        div[data-testid="stTabs"] button[aria-selected="true"] {{
-            color: var(--text);
-            border-bottom-color: var(--accent) !important;
-        }}
-
-        [data-testid="stAlert"] {{
-            background: var(--surface) !important;
-            border: 1px solid var(--line) !important;
-            color: var(--text) !important;
-        }}
-
-        [data-testid="stExpander"] details {{
-            background: var(--surface) !important;
-            border: 1px solid var(--line) !important;
-        }}
-
-        [data-testid="stExpander"] summary {{
-            color: var(--text) !important;
-            font-weight: 600;
-        }}
-
-
-        .terminal-cell {{
-            min-height: 3.05rem;
-            padding: 0.28rem 0.16rem 0.30rem 0.16rem;
-        }}
-
-        .terminal-cell .primary {{
-            color: var(--text);
-            font-size: 0.84rem;
-            font-weight: 550;
-            line-height: 1.25;
-            white-space: normal;
-        }}
-
-        .terminal-cell .secondary {{
-            color: var(--muted-2);
-            font-size: 0.70rem;
-            line-height: 1.25;
-            margin-top: 0.12rem;
-        }}
-
-        .terminal-table-head {{
-            color: var(--muted-2);
-            font-size: 0.62rem;
-            font-weight: 700;
-            letter-spacing: 0.11em;
-            text-transform: uppercase;
-            padding: 0.20rem 0.12rem 0.34rem 0.12rem;
-        }}
-
-        .terminal-row-divider {{
-            height: 1px;
-            background: var(--line-soft);
-            margin: 0.12rem 0 0.18rem 0;
-        }}
-
-        .terminal-row-meta {{
-            color: var(--muted-2);
-            font-size: 0.70rem;
-            line-height: 1.35;
-            margin: -0.02rem 0 0.30rem 0;
-        }}
-
-        .terminal-row-meta strong {{
-            color: var(--muted);
-            font-weight: 560;
-        }}
-
-        @media(max-width: 1180px) {{
-            .block-container {{
-                max-width: 100%;
-                padding-left: 1.2rem;
-                padding-right: 1.2rem;
-            }}
-            .terminal-cell .primary {{
-                font-size: 0.78rem;
-            }}
-            .terminal-cell .secondary {{
-                font-size: 0.66rem;
-            }}
-        }}
-
-        @media(max-width: 980px) {{
-            .terminal-header {{
-                grid-template-columns: 1fr;
-            }}
-            .terminal-build {{
-                border-left: 0;
-                padding-left: 0;
-            }}
-            .context-strip {{
-                grid-template-columns: 1fr 1fr;
-            }}
-            .stage-row {{
-                grid-template-columns: 1fr;
-                gap: 0.22rem;
-            }}
+        @media (max-width: 900px) {{
+            .context-strip {{ grid-template-columns:1fr 1fr; }}
+            .stage-summary {{ grid-template-columns:1fr; }}
+            .terminal-build {{ display:none; }}
         }}
         </style>
         """,
@@ -615,71 +246,42 @@ def apply_style():
     )
 
 
-
 def page_header(eyebrow: str, title: str, question: str, build: str):
     st.html(
-        (
-            '<div class="terminal-header">'
-            '<div>'
-            f'<div class="terminal-eyebrow">{escape(eyebrow)}</div>'
-            f'<h1>{escape(title)}</h1>'
-            '</div>'
-            f'<div class="terminal-build">{escape(build)}</div>'
-            '</div>'
-            '<div class="page-question">'
-            '<span>Frage</span>'
-            f'{escape(question)}'
-            '</div>'
-        )
+        '<div class="terminal-header">'
+        '<div>'
+        f'<div class="terminal-eyebrow">{escape(eyebrow)}</div>'
+        f'<h1>{escape(title)}</h1>'
+        '</div>'
+        f'<div class="terminal-build">{escape(build)}</div>'
+        '</div>'
+        f'<div class="page-question">{escape(question)}</div>'
     )
 
 
 def context_strip(items):
-    cells = []
-    for label, value in items:
-        label_e = escape(str(label))
-        value_e = escape(str(value))
-        cells.append(
-            '<div class="context-item">'
-            f'<div class="context-label">{label_e}</div>'
-            f'<div class="context-value" title="{value_e}">{value_e}</div>'
-            '</div>'
-        )
-    st.html('<div class="context-strip">' + ''.join(cells) + '</div>')
+    cells=[]
+    for label,value in items:
+        le,ve=escape(str(label)),escape(str(value))
+        cells.append('<div class="context-item">'+f'<div class="context-label">{le}</div><div class="context-value" title="{ve}">{ve}</div></div>')
+    st.html('<div class="context-strip">'+''.join(cells)+'</div>')
 
 
 def stage_summary(rows):
-    parts = ['<div class="stage-summary">']
-    for idx, row in enumerate(rows, start=1):
-        tone = row.get("tone", "")
-        tone_class = (
-            " direction-bull"
-            if tone == "bull"
-            else " direction-bear"
-            if tone == "bear"
-            else ""
-        )
-        parts.extend([
-            '<div class="stage-row">',
-            '<div>',
-            f'<span class="stage-number">Stufe {idx}</span>',
-            f'<span class="stage-label">{escape(str(row["label"]))}</span>',
-            '</div>',
-            f'<div class="stage-primary{tone_class}">{escape(str(row["primary"]))}</div>',
-            f'<div class="stage-detail">{escape(str(row["detail"]))}</div>',
-            '</div>',
-        ])
+    parts=['<div class="stage-summary">']
+    for idx,row in enumerate(rows,start=1):
+        tone=row.get('tone','')
+        tone_class=' direction-bull' if tone=='bull' else ' direction-bear' if tone=='bear' else ''
+        parts.append('<div class="stage-row">')
+        parts.append(f'<div><span class="stage-number">Stufe {idx}</span><span class="stage-label">{escape(str(row["label"]))}</span></div>')
+        parts.append(f'<div class="stage-primary{tone_class}">{escape(str(row["primary"]))}</div>')
+        parts.append(f'<div class="stage-detail">{escape(str(row["detail"]))}</div></div>')
     parts.append('</div>')
     st.html(''.join(parts))
 
 
 def section_line(name: str, meta: str = ""):
-    st.html(
-        '<div class="section-line">'
-        f'<div class="name">{escape(name)}</div>'
-        f'<div class="meta">{escape(meta)}</div>'
-        '</div>'
-    )
+    st.html('<div class="section-line">'+f'<div class="name">{escape(name)}</div><div class="meta">{escape(meta)}</div></div>')
 
 
 def definition(text: str):
@@ -687,42 +289,17 @@ def definition(text: str):
 
 
 def empty_state(title: str, detail: str):
-    st.html(
-        '<div class="empty-state">'
-        f'<strong>{escape(title)}</strong>'
-        f'<span>{escape(detail)}</span>'
-        '</div>'
-    )
+    st.html('<div class="empty-state">'+f'<strong>{escape(title)}</strong><span>{escape(detail)}</span></div>')
 
 
 def metric_card(label, value, note=""):
-    st.html(
-        '<div class="metric">'
-        f'<small>{escape(str(label))}</small>'
-        f'<div class="value">{escape(str(value))}</div>'
-        f'<div class="note">{escape(str(note))}</div>'
-        '</div>'
-    )
+    st.html('<div class="metric">'+f'<small>{escape(str(label))}</small><div class="value">{escape(str(value))}</div><div class="note">{escape(str(note))}</div></div>')
 
 
 def terminal_cell(primary: str, secondary: str = "", tone: str = ""):
-    tone_class = (
-        " direction-bull"
-        if tone == "bull"
-        else " direction-bear"
-        if tone == "bear"
-        else ""
-    )
-    secondary_html = (
-        f'<div class="secondary">{escape(str(secondary))}</div>'
-        if secondary else ""
-    )
-    st.html(
-        '<div class="terminal-cell">'
-        f'<div class="primary{tone_class}">{escape(str(primary))}</div>'
-        f'{secondary_html}'
-        '</div>'
-    )
+    tone_class=' direction-bull' if tone=='bull' else ' direction-bear' if tone=='bear' else ''
+    secondary_html=f'<div class="secondary">{escape(str(secondary))}</div>' if secondary else ''
+    st.html('<div class="terminal-cell">'+f'<div class="primary{tone_class}">{escape(str(primary))}</div>{secondary_html}</div>')
 
 
 def terminal_table_head(text: str):
@@ -735,7 +312,6 @@ def row_divider():
 
 def row_meta(text: str):
     st.html(f'<div class="terminal-row-meta">{escape(str(text))}</div>')
-
 
 # ---------------------------------------------------------------------------
 # PLOTLY · TradingView-like interaction

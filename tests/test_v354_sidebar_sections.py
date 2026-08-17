@@ -1,35 +1,26 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_sidebar_is_grouped_into_three_sections():
+def test_sidebar_uses_v390_workspace_hierarchy():
     text = (ROOT / "app.py").read_text()
-    assert '"SCHNELLÜBERBLICK": [' in text
-    assert '"MARKT & PORTFOLIO": [' in text
+    assert '"WORKSPACE": [' in text
     assert '"RESEARCH": [' in text
+    assert '"TRADING": [' in text
+    assert '"ADVANCED": [' in text
     assert 'st.navigation(pages, position="sidebar")' in text
 
 
-def test_quick_overview_contains_only_watchlist_and_cockpit_first():
+def test_dashboard_is_default_and_watchlist_is_research():
     text = (ROOT / "app.py").read_text()
-    quick = text.split('"SCHNELLÜBERBLICK": [', 1)[1].split('"MARKT & PORTFOLIO": [', 1)[0]
-    assert 'pages/watchlist.py' in quick
-    assert 'pages/risk_cockpit.py' in quick
-    assert 'pages/portfolio_risk.py' not in quick
-    assert 'pages/forex_matrix.py' not in quick
-    assert 'pages/research_lab.py' not in quick
+    dashboard = text.split('"pages/dashboard.py"', 1)[1].split('),', 1)[0]
+    assert 'default=True' in dashboard
+    assert text.index('pages/dashboard.py') < text.index('pages/watchlist.py')
 
 
-def test_watchlist_remains_default_page():
+def test_daily_workflow_precedes_advanced_research():
     text = (ROOT / "app.py").read_text()
-    watchlist = text.split('"pages/watchlist.py"', 1)[1].split('),', 1)[0]
-    assert 'default=True' in watchlist
-
-
-def test_detail_and_research_order_is_intentional():
-    text = (ROOT / "app.py").read_text()
-    assert text.index('pages/marktanalyse.py') < text.index('pages/forex_matrix.py')
-    assert text.index('pages/forex_matrix.py') < text.index('pages/portfolio_risk.py')
+    assert text.index('pages/watchlist.py') < text.index('pages/research_lab.py')
+    assert text.index('pages/trade_planner.py') < text.index('pages/research_lab.py')
     assert text.index('pages/research_lab.py') < text.index('pages/datenmodell.py')

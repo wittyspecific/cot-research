@@ -151,10 +151,10 @@ def number(value, digits=1):
 
 
 page_header(
-    "Methoden- und Validierungsstudien",
+    "Advanced · Research Lab",
     "COT Research Lab",
-    "Hält die beobachtete COT-Struktur historischen Kontrolltests stand?",
-    "SPEC FLOW · V3.3.2",
+    "Methoden vergleichen, Robustheit prüfen und Signale validieren.",
+    "V3.9.0 · ADVANCED RESEARCH",
 )
 
 back_col, detail_col, data_col = st.columns([0.28, 0.36, 0.36])

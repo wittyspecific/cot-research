@@ -120,11 +120,25 @@ def enrich_cot(
     return out
 
 
-def current_signal(row: pd.Series, upper: float = 80, lower: float = 20) -> str:
-    if row["commercial_index"] >= upper and row["retail_index"] <= lower:
-        return "BULLISH"
-    if row["commercial_index"] <= lower and row["retail_index"] >= upper:
-        return "BEARISH"
+def current_signal(
+    row: pd.Series,
+    upper: float = 80,
+    lower: float = 20,
+    *,
+    cycle: dict | None = None,
+) -> str:
+    """Return a directional signal only after a confirmed hedge release.
+
+    An extreme COT index is a positioning *state*, not a trade direction.
+    The optional ``cycle`` object is produced by :func:`hedger_cycle_state`.
+    Without a release context this function deliberately returns NEUTRAL.
+    """
+    if cycle and str(cycle.get("phase", "")).upper() == "RELEASE":
+        direction = int(cycle.get("direction", 0) or 0)
+        if direction > 0:
+            return "BULLISH"
+        if direction < 0:
+            return "BEARISH"
     return "NEUTRAL"
 
 
@@ -251,7 +265,7 @@ def hedger_cycle_state(
     valid = cot.dropna(subset=["commercial_index", "commercial_net"]).copy().reset_index(drop=True)
     if len(valid) < 2:
         return {
-            "state": "NO CYCLE DATA", "direction": 0, "phase": "NONE",
+            "state": "NO CYCLE DATA", "direction": 0, "extreme_direction": 0, "phase": "NONE",
             "extreme_duration": 0, "weeks_since_release": np.nan,
             "extreme_index": np.nan, "extreme_net": np.nan,
             "entry_date": None, "release_date": None,
@@ -279,14 +293,18 @@ def hedger_cycle_state(
     if current_zone != 0:
         start, end, ep, extreme_index, extreme_net = episode(last, current_zone)
         duration = len(ep)
+        # V3.9.0 semantics: an extreme is a POSITIONING STATE, not a directional signal.
+        # A high Commercial COT index is FULL HEDGE. Bullish/bearish direction only
+        # becomes active once the hedgers RELEASE the corresponding extreme.
         if current_zone == 1:
-            phase = "ENTERING BULLISH EXTREME" if duration == 1 else "BULLISH EXTREME · PERSISTENCE"
+            phase = "FULL HEDGE · UPPER EXTREME" if duration == 1 else "FULL HEDGE · PERSISTENCE"
         else:
-            phase = "ENTERING BEARISH EXTREME" if duration == 1 else "BEARISH EXTREME · PERSISTENCE"
+            phase = "LOW HEDGE · LOWER EXTREME" if duration == 1 else "LOW HEDGE · PERSISTENCE"
         return {
             "state": phase,
             "phase": "EXTREME",
-            "direction": current_zone,
+            "direction": 0,
+            "extreme_direction": current_zone,
             "extreme_duration": int(duration),
             "weeks_since_release": np.nan,
             "extreme_index": extreme_index,
@@ -305,7 +323,7 @@ def hedger_cycle_state(
 
     if last_extreme is None:
         return {
-            "state": "NO ACTIVE CYCLE", "phase": "NONE", "direction": 0,
+            "state": "NO ACTIVE CYCLE", "phase": "NONE", "direction": 0, "extreme_direction": 0,
             "extreme_duration": 0, "weeks_since_release": np.nan,
             "extreme_index": np.nan, "extreme_net": np.nan,
             "entry_date": None, "release_date": None,
@@ -332,6 +350,7 @@ def hedger_cycle_state(
         "state": state,
         "phase": phase,
         "direction": direction,
+        "extreme_direction": z,
         "extreme_duration": int(len(ep)),
         "weeks_since_release": int(weeks_since_release),
         "extreme_index": extreme_index,
@@ -464,12 +483,11 @@ def classify_positioning_bias(
     validation_upper: float = 80,
     validation_lower: float = 20,
 ) -> dict:
-    """
-    Less binary directional state than the original strict 80/20 gate.
+    """Classify the current Commercial positioning STATE, not a trade signal.
 
-    A strict signal requires Commercial + Retail index opposition.
-    A net-backed bias can still exist when the Commercial COT index is extreme
-    and the longer-horizon Commercial/Retail net percentiles confirm it.
+    V3.9.0 explicitly separates state from transition: a Commercial COT index
+    in an extreme zone is FULL/LOW HEDGE context. Direction remains neutral
+    until hedger_cycle_state() reports a RELEASE.
     """
     ci = float(row.get("commercial_index", np.nan))
     ri = float(row.get("retail_index", np.nan))
@@ -477,34 +495,38 @@ def classify_positioning_bias(
     rp = float(row.get("retail_net_percentile", np.nan))
 
     if not all(np.isfinite(v) for v in [ci, ri, cp, rp]):
-        return {"state": "NEUTRAL", "direction": 0, "strict": False, "net_backed": False}
+        return {"state": "NEUTRAL", "direction": 0, "extreme_direction": 0, "strict": False, "net_backed": False}
 
-    strict_bull = ci >= upper and ri <= lower
-    strict_bear = ci <= lower and ri >= upper
+    upper_state = ci >= upper
+    lower_state = ci <= lower
+    upper_strict = upper_state and ri <= lower
+    lower_strict = lower_state and ri >= upper
+    upper_net = upper_state and cp >= validation_upper and rp <= validation_lower
+    lower_net = lower_state and cp <= validation_lower and rp >= validation_upper
 
-    net_bull = ci >= upper and cp >= validation_upper and rp <= validation_lower
-    net_bear = ci <= lower and cp <= validation_lower and rp >= validation_upper
+    if upper_state:
+        if upper_strict and upper_net:
+            state = "FULL HEDGE · CONFIRMED STATE"
+        elif upper_net:
+            state = "FULL HEDGE · NET BACKED"
+        elif upper_strict:
+            state = "FULL HEDGE · INDEX EXTREME"
+        else:
+            state = "FULL HEDGE · WATCH"
+        return {"state": state, "direction": 0, "extreme_direction": 1, "strict": bool(upper_strict), "net_backed": bool(upper_net)}
 
-    if strict_bull and net_bull:
-        return {"state": "BULLISH CONFIRMED", "direction": 1, "strict": True, "net_backed": True}
-    if strict_bear and net_bear:
-        return {"state": "BEARISH CONFIRMED", "direction": -1, "strict": True, "net_backed": True}
-    if net_bull:
-        return {"state": "BULLISH BIAS", "direction": 1, "strict": strict_bull, "net_backed": True}
-    if net_bear:
-        return {"state": "BEARISH BIAS", "direction": -1, "strict": strict_bear, "net_backed": True}
-    if strict_bull:
-        return {"state": "BULLISH INDEX EXTREME", "direction": 1, "strict": True, "net_backed": False}
-    if strict_bear:
-        return {"state": "BEARISH INDEX EXTREME", "direction": -1, "strict": True, "net_backed": False}
+    if lower_state:
+        if lower_strict and lower_net:
+            state = "LOW HEDGE · CONFIRMED STATE"
+        elif lower_net:
+            state = "LOW HEDGE · NET BACKED"
+        elif lower_strict:
+            state = "LOW HEDGE · INDEX EXTREME"
+        else:
+            state = "LOW HEDGE · WATCH"
+        return {"state": state, "direction": 0, "extreme_direction": -1, "strict": bool(lower_strict), "net_backed": bool(lower_net)}
 
-    # Commercial-only watch state: useful before Retail reaches the opposite 20/80.
-    if ci >= upper:
-        return {"state": "BULLISH WATCH", "direction": 1, "strict": False, "net_backed": False}
-    if ci <= lower:
-        return {"state": "BEARISH WATCH", "direction": -1, "strict": False, "net_backed": False}
-
-    return {"state": "NEUTRAL", "direction": 0, "strict": False, "net_backed": False}
+    return {"state": "NEUTRAL", "direction": 0, "extreme_direction": 0, "strict": False, "net_backed": False}
 
 
 def attach_cot_prices(cot: pd.DataFrame, prices: pd.DataFrame) -> pd.DataFrame:

@@ -39,7 +39,6 @@ from src.analysis import (
     classify_positioning_bias,
     commercial_range_state,
     cot_index,
-    current_signal,
     enrich_cot,
     hedger_cycle_state,
     historical_hedger_releases,
@@ -265,10 +264,10 @@ def de_nearest(value):
 
 
 page_header(
-    "Einzelmarkt · Positionierungsanalyse",
+    "Research · Markt",
     "COT Marktanalyse",
-    "Wo steht dieser Markt im Positionierungszyklus?",
-    "V3.4.4.4 · TRADINGVIEW Y-SCALE",
+    "Zustand, Hedge-Release und Bestätigung klar getrennt.",
+    "V3.9.0 · STATE ≠ SIGNAL",
 )
 
 nav_back_col, nav_hint_col = st.columns([0.22, 0.78])
@@ -450,7 +449,6 @@ if valid.empty:
 
 latest = valid.iloc[-1]
 latest_publication = publication_info(latest["report_date"])
-signal = current_signal(latest, upper, lower)
 positioning = classify_positioning_bias(
     latest,
     upper=upper,
@@ -459,8 +457,10 @@ positioning = classify_positioning_bias(
     validation_lower=validation_lower,
 )
 range_state = commercial_range_state(latest)
-velocity = positioning_velocity_state(latest, direction=positioning["direction"])
 cycle = hedger_cycle_state(cot, upper=upper, lower=lower, release_active_weeks=RELEASE_ACTIVE_WEEKS)
+research_direction = int(cycle.get("direction", 0) or 0) if cycle.get("phase") == "RELEASE" else 0
+context_direction = research_direction if research_direction else int(cycle.get("extreme_direction", 0) or 0)
+velocity = positioning_velocity_state(latest, direction=context_direction)
 
 prices = load_prices(price_ticker, raw_cot["report_date"].min())
 
@@ -494,7 +494,7 @@ for _horizon in (20, 40, 60):
     else:
         _row = _rows.iloc[0]
         market_multi_seasonality[_horizon] = classify_asset_seasonality(
-            cot_direction=int(positioning["direction"]),
+            cot_direction=int(research_direction),
             sample_size=int(_row["stichprobe"]),
             positive_years=int(_row["positive_jahre"]),
             positive_rate=float(_row["trefferquote_positiv"]),
@@ -589,8 +589,8 @@ else:
 
 
 validation_direction = (
-    "BULLISH" if positioning["direction"] > 0
-    else "BEARISH" if positioning["direction"] < 0
+    "BULLISH" if context_direction > 0
+    else "BEARISH" if context_direction < 0
     else "NEUTRAL"
 )
 validation = net_validation(
@@ -829,6 +829,10 @@ with action_c:
         }
         st.switch_page("pages/datenmodell.py")
 
+definition(
+    "State ≠ Signal: Ein hoher Commercial COT-Index beschreibt FULL HEDGE. Erst ein Hedge-Release aus der Extremzone aktiviert die bullishe/bärische Richtung. Extremwerte allein werden hier nicht mehr als Signal eingefärbt."
+)
+
 stage_summary(
     [
         {
@@ -841,7 +845,7 @@ stage_summary(
                 f"Retail {_index_context(float(latest['retail_index']))}. "
                 f"COT-Index = Position innerhalb des {cot_weeks}W-Min/Max-Fensters."
             ),
-            "tone": _direction_tone(positioning["state"]),
+            "tone": "",
         },
         {
             "label": "Netto-Validierung",
@@ -876,7 +880,7 @@ stage_summary(
                 + ("—" if pd.isna(cycle["extreme_index"]) else f"{cycle['extreme_index']:.1f}")
                 + "."
             ),
-            "tone": _direction_tone(cycle["state"]),
+            "tone": _direction_tone(cycle["state"]) if cycle.get("phase") == "RELEASE" else "",
         },
         {
             "label": "Speculativer Flow",

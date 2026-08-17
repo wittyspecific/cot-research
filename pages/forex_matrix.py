@@ -64,8 +64,9 @@ def render_currency_table(profiles: pd.DataFrame):
                     f"{CURRENCY_NAMES_DE.get(row['symbol'], row['symbol'])} "
                     f"· {row['symbol']}"
                 ),
-                "COT-Bias": currency_bias_display(row),
-                "COT": value_text(row["commercial_index"], bool(row["cot_ok"])),
+                "State": str(row.get("state_label", "—")),
+                "Signal": currency_bias_display(row),
+                "COT Index": f"{float(row['commercial_index']):.1f}" if pd.notna(row.get("commercial_index")) else "—",
                 "Commercial": value_text(
                     row["commercial_net_percentile"],
                     bool(row["commercial_ok"]),
@@ -170,10 +171,10 @@ def render_pairs(df: pd.DataFrame):
 
 
 page_header(
-    "Forex COT Matrix",
+    "Research · Forex",
     "Relative Währungsstärke",
-    "Starke COT-Währung gegen schwache COT-Währung.",
-    "V3.8.1.1 · CURRENCY 20/40/60T SEASONALITY",
+    "Hedge-Release-Signale der Einzelwährungen werden zu Paaren kombiniert.",
+    "V3.9.0 · RELEASE-BASED FX",
 )
 
 st.caption(
@@ -220,14 +221,12 @@ context_strip(
 )
 
 definition(
-    "Währungsstärke: bullish 1/4 bis 4/4 = +1 bis +4, bearish entsprechend "
-    "-1 bis -4. NC-Netto ist die vierte Positionierungsbedingung und muss bei bullish tief bzw. bei bearish hoch liegen. Paarbias = Basis minus Gegenwährung. Die 20J/20-40-60T-Saisonalität "
-    "bleibt eine separate Bestätigung und wird nicht in die COT-Stärke eingerechnet."
+    "State ≠ Signal: Ein COT-Extrem erzeugt noch keine Währungsrichtung. Erst ein aktives Hedge-Release wird als +/− COT-Stärke gezählt. Commercial-, Non-Commercial- und Retail-Netto können dieses Release bis 4/4 bestätigen. Paarbias = Signalstärke Basis minus Gegenwährung; Saison bleibt separat."
 )
 
 section_line(
     "Währungsübersicht",
-    "COT · Commercial-Netto · Non-Commercial-Netto · Retail-Netto · Saison 20/40/60T",
+    "Hedge-State · Release-Signal · Netto-Bestätigung · Saison",
 )
 st.caption(
     "Saison: ▲ bullish · ▼ bearish · — gemischt · · N/V. "
@@ -242,8 +241,7 @@ section_line(
 )
 
 st.caption(
-    "Beispiel: CAD bullish 4/4 + CHF bearish 4/4 → CADCHF STARK BULLISH. "
-    "AUD bullish 1/4 + CAD bearish 1/4 → AUDCAD LEICHT BULLISH."
+    "Nur aktive Releases tragen Richtung. FULL HEDGE ohne Release bleibt neutral und erzeugt keinen Paarbias."
 )
 
 only_supported = st.toggle(
@@ -298,7 +296,9 @@ with st.expander("Wie entsteht der COT-Paarbias?", expanded=False):
 - Bearish entsprechend `-1` bis `-4`
 
 Die vier Bedingungen sind:
-`COT-Extrem + Commercial-Netto + Non-Commercial-Netto + Retail-Netto`.
+`Hedge-Release + Commercial-Netto + Non-Commercial-Netto + Retail-Netto`.
+
+Ein COT-Extrem allein bleibt **State / Waiting for Release** und zählt nicht als bullishes oder bärisches Signal.
 
 Bei einem bullishen Reversal-Bias muss das NC-Netto historisch **tief** liegen;
 bei einem bearishen Bias historisch **hoch**.

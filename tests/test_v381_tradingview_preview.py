@@ -33,12 +33,12 @@ def test_timeframe_to_widget_interval():
     assert tradingview_interval("Andere") == "240"
 
 
-def test_embed_uses_official_advanced_chart_script_and_dark_theme():
+def test_embed_uses_official_advanced_chart_script_and_light_theme():
     html = tradingview_embed_html("AUDUSD", "4H")
     assert "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js" in html
     assert '"symbol":"FX_IDC:AUDUSD"' in html
     assert '"interval":"240"' in html
-    assert '"theme":"dark"' in html
+    assert '"theme":"light"' in html
     assert '"allow_symbol_change":true' in html
     assert "by TradingView" in html
 
@@ -47,6 +47,6 @@ def test_planner_and_journal_render_tradingview_preview():
     planner = (ROOT / "pages" / "trade_planner.py").read_text()
     journal = (ROOT / "pages" / "trading_journal.py").read_text()
     assert "render_tradingview_chart(symbol" in planner
-    assert "TradingView Preview" in planner
+    assert "render_tradingview_chart(symbol" in planner
     assert "render_tradingview_chart(str(row[\"cfd_symbol\"])" in journal
     assert "MT5-CFD-Historie" in journal

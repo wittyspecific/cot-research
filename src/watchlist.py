@@ -261,7 +261,9 @@ def scan_classic_markets(
                     lower=lower,
                     release_active_weeks=int(release_active_weeks),
                 )
-                cycle_direction = int(cycle.get("direction", 0) or 0)
+                signal_direction = int(cycle.get("direction", 0) or 0)
+                extreme_direction = int(cycle.get("extreme_direction", 0) or 0)
+                context_direction = signal_direction if cycle.get("phase") == "RELEASE" else extreme_direction
 
                 positioning = classify_positioning_bias(
                     latest,
@@ -275,7 +277,7 @@ def scan_classic_markets(
                 # extreme zone. Validation must therefore follow the direction of
                 # the preceding Hedger cycle, not the current index state.
                 validation_direction = (
-                    cycle_direction
+                    context_direction
                     if cycle["phase"] in {"EXTREME", "RELEASE"}
                     else int(positioning["direction"])
                 )
@@ -293,6 +295,7 @@ def scan_classic_markets(
                 )
 
                 active_cycle = cycle["phase"] in {"EXTREME", "RELEASE"}
+                signal_active = cycle["phase"] == "RELEASE" and signal_direction != 0
                 validation_ok = (
                     active_cycle
                     and validation_direction != 0
@@ -304,7 +307,9 @@ def scan_classic_markets(
                     and expected_range is not None
                     and range_state["state"] == expected_range
                 )
-                qualifies = bool(active_cycle and validation_ok and range_ok)
+                # A current extreme is only a watch-state. A directional candidate
+                # exists after the hedge RELEASE has occurred.
+                qualifies = bool(signal_active and validation_ok and range_ok)
 
                 failed = []
                 if not active_cycle:
@@ -344,7 +349,10 @@ def scan_classic_markets(
 
                     "cycle_state": cycle["state"],
                     "cycle_phase": cycle["phase"],
-                    "cycle_direction": validation_direction,
+                    "cycle_direction": signal_direction,
+                    "extreme_direction": extreme_direction,
+                    "context_direction": context_direction,
+                    "signal_active": bool(signal_active),
                     "extreme_duration": int(cycle.get("extreme_duration", 0) or 0),
                     "weeks_since_release": cycle.get("weeks_since_release", np.nan),
                     "extreme_index": cycle.get("extreme_index", np.nan),

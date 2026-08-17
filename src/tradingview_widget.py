@@ -101,11 +101,11 @@ def tradingview_embed_html(cfd_symbol: str, timeframe: str | None = None) -> str
         "symbol": tv_symbol,
         "interval": tradingview_interval(timeframe),
         "timezone": "Etc/UTC",
-        "theme": "dark",
+        "theme": "light",
         "style": "1",
         "locale": "en",
-        "backgroundColor": "#0B1320",
-        "gridColor": "rgba(53, 72, 95, 0.28)",
+        "backgroundColor": "#FFFFFF",
+        "gridColor": "rgba(148, 163, 184, 0.18)",
         "withdateranges": True,
         "hide_side_toolbar": False,
         "hide_top_toolbar": False,
@@ -123,11 +123,11 @@ def tradingview_embed_html(cfd_symbol: str, timeframe: str | None = None) -> str
 <head>
 <meta charset=\"utf-8\">
 <style>
-html, body {{ margin: 0; padding: 0; background: #0B1320; height: 100%; overflow: hidden; }}
+html, body {{ margin: 0; padding: 0; background: #FFFFFF; height: 100%; overflow: hidden; }}
 .tradingview-widget-container {{ height: 100%; width: 100%; }}
 .tradingview-widget-container__widget {{ height: calc(100% - 24px); width: 100%; }}
-.tradingview-widget-copyright {{ height: 24px; box-sizing: border-box; padding: 5px 8px 0; font: 11px/1.2 Arial, sans-serif; color: #8596AC; }}
-.tradingview-widget-copyright a {{ color: #7EB9E6; text-decoration: none; }}
+.tradingview-widget-copyright {{ height: 24px; box-sizing: border-box; padding: 5px 8px 0; font: 11px/1.2 Arial, sans-serif; color: #6B7280; }}
+.tradingview-widget-copyright a {{ color: #16A34A; text-decoration: none; }}
 </style>
 </head>
 <body>

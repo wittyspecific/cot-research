@@ -136,23 +136,30 @@ def _price_features(prices: pd.DataFrame) -> dict[str, Any]:
     return out
 
 
-def _confirmation_snapshot(latest: pd.Series) -> dict[str, Any]:
+def _confirmation_snapshot(latest: pd.Series, cycle: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Freeze COT confirmation using release semantics.
+
+    Extremes remain raw state features; only a Hedger RELEASE carries a
+    directional signal. This prevents ML snapshots from learning that
+    COT-index=100 is automatically bullish.
+    """
     cot = _finite(latest.get("commercial_index"))
     comm = _finite(latest.get("commercial_net_percentile"))
     nc = _finite(latest.get("noncommercial_net_percentile"))
     retail = _finite(latest.get("retail_net_percentile"))
-    direction = 0
+    cycle = dict(cycle or {})
+    phase = str(cycle.get("phase") or "").upper()
+    direction = int(cycle.get("direction", 0) or 0) if phase == "RELEASE" else 0
+    extreme_direction = int(cycle.get("extreme_direction", 0) or 0)
     flags = {"cot": False, "commercial": False, "noncommercial": False, "retail": False}
-    if np.isfinite(cot) and cot >= INDEX_UPPER:
-        direction = 1
+    if direction > 0:
         flags = {
             "cot": True,
             "commercial": bool(np.isfinite(comm) and comm >= NET_UPPER_PERCENTILE),
             "noncommercial": bool(np.isfinite(nc) and nc <= NET_LOWER_PERCENTILE),
             "retail": bool(np.isfinite(retail) and retail <= NET_LOWER_PERCENTILE),
         }
-    elif np.isfinite(cot) and cot <= INDEX_LOWER:
-        direction = -1
+    elif direction < 0:
         flags = {
             "cot": True,
             "commercial": bool(np.isfinite(comm) and comm <= NET_LOWER_PERCENTILE),
@@ -160,12 +167,18 @@ def _confirmation_snapshot(latest: pd.Series) -> dict[str, Any]:
             "retail": bool(np.isfinite(retail) and retail >= NET_UPPER_PERCENTILE),
         }
     confirmations = int(sum(int(v) for v in flags.values()))
+    state = "FULL_HEDGE" if phase == "EXTREME" and extreme_direction > 0 else "LOW_HEDGE" if phase == "EXTREME" and extreme_direction < 0 else phase or "NONE"
     return {
         "direction": direction,
         "bias": "BULLISH" if direction > 0 else "BEARISH" if direction < 0 else "NEUTRAL",
+        "state": state,
+        "cycle_phase": phase or "NONE",
+        "extreme_direction": extreme_direction,
+        "release_active": bool(phase == "RELEASE" and direction != 0),
         "confirmations": confirmations,
         "label": f"{confirmations}/4" if confirmations else "0/4",
         "flags": flags,
+        "commercial_index": cot,
     }
 
 
@@ -244,7 +257,10 @@ def collect_market_research_snapshot(asset_class: str, market: Mapping[str, Any]
         if valid.empty:
             raise RuntimeError("Nicht genügend Historie für aktuellen COT-Snapshot")
         latest = valid.iloc[-1]
-        confirmation = _confirmation_snapshot(latest)
+        cycle = hedger_cycle_state(
+            cot, upper=INDEX_UPPER, lower=INDEX_LOWER, release_active_weeks=RELEASE_ACTIVE_WEEKS
+        )
+        confirmation = _confirmation_snapshot(latest, cycle)
         positioning = classify_positioning_bias(
             latest,
             upper=INDEX_UPPER,
@@ -252,17 +268,18 @@ def collect_market_research_snapshot(asset_class: str, market: Mapping[str, Any]
             validation_upper=NET_UPPER_PERCENTILE,
             validation_lower=NET_LOWER_PERCENTILE,
         )
-        validation_direction = "BULLISH" if positioning["direction"] > 0 else "BEARISH" if positioning["direction"] < 0 else "NEUTRAL"
+        validation_direction = "BULLISH" if confirmation["direction"] > 0 else "BEARISH" if confirmation["direction"] < 0 else "NEUTRAL"
         result["legacy"] = {
             "latest": _series_dict(latest),
             "recent_12w": _records(cot, tail=12),
-            "signal": current_signal(latest, INDEX_UPPER, INDEX_LOWER),
+            "signal": current_signal(latest, INDEX_UPPER, INDEX_LOWER, cycle=cycle),
+            "positioning_state": positioning.get("state", "NEUTRAL"),
             "confirmation_4of4": confirmation,
             "positioning": positioning,
             "net_validation": net_validation(latest, validation_direction, NET_UPPER_PERCENTILE, NET_LOWER_PERCENTILE),
             "commercial_range": commercial_range_state(latest),
-            "velocity": positioning_velocity_state(latest, direction=positioning["direction"]),
-            "hedger_cycle": hedger_cycle_state(cot, upper=INDEX_UPPER, lower=INDEX_LOWER, release_active_weeks=RELEASE_ACTIVE_WEEKS),
+            "velocity": positioning_velocity_state(latest, direction=confirmation["direction"]),
+            "hedger_cycle": cycle,
             "publication": publication_info(latest["report_date"]),
         }
     except Exception as exc:

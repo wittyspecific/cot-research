@@ -72,9 +72,9 @@ def _entry_display(row) -> str | float:
 
 page_header(
     "Trading · Journal",
-    "Trading Journal",
-    "Unveränderliche Trade-Pläne, getrennte Trader-Identitäten und automatisch berechnete Simulationsergebnisse.",
-    "V3.8.1.5.1 · MARKET AUTO-FILL & PRICE UNITS",
+    "Journal",
+    "Geplant, aktiv, geschlossen oder verworfen – ohne technische Details im Weg.",
+    "V3.9.0 · CLEAN JOURNAL",
 )
 
 deployment = deployment_config_from_mapping(_secret_section("deployment"))
@@ -132,7 +132,7 @@ with m3:
 with m4:
     metric_card("EXPIRED / ?", f"{summary.get('expired', 0)} / {summary.get('ambiguous', 0)}", "nicht ausgelöst / intrabar unklar")
 
-section_line("Outcome Tracker", "Live Entry alle ~2s · History-Safety-Net: MARKET M1 · danach H1 → M5 → M1")
+section_line("Execution & Outcomes", "Live Entry + History Safety-Net")
 
 if is_remote:
     st.info(
@@ -201,7 +201,7 @@ with st.expander("Research / ML Feature-Matrix", expanded=False):
             csv_data = matrix.to_csv(index=False).encode("utf-8")
             st.download_button("Feature-Matrix als CSV exportieren", data=csv_data, file_name="cot_trade_feature_matrix.csv", mime="text/csv")
 
-section_line("Trade-Pläne", "REAL · SIMULATION · SKIPPED")
+section_line("Trades", "REAL · SIMULATION · SKIPPED")
 filter_type = st.radio("Filter", ["ALLE", "REAL", "SIMULATION", "SKIPPED"], horizontal=True)
 show_voided = st.toggle("Verworfene Fehleinträge anzeigen", value=False, help="VOID-Pläne bleiben revisionssicher gespeichert, zählen aber nicht zu Statistik, Prop Desk, Outcome-Sync oder ML.")
 try:

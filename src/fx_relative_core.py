@@ -53,72 +53,55 @@ def currency_cot_profile(
     commercial_net_percentile,
     noncommercial_net_percentile=np.nan,
     retail_net_percentile=np.nan,
+    cycle_phase: str | None = None,
+    cycle_direction: int = 0,
+    extreme_direction: int = 0,
+    cycle_state: str | None = None,
     index_upper: float = 80.0,
     index_lower: float = 20.0,
     net_upper: float = 80.0,
     net_lower: float = 20.0,
 ) -> dict:
-    """
-    Transparent signed COT strength:
-      +1..+4 = bullish 1/4 .. 4/4
-      -1..-4 = bearish 1/4 .. 4/4
-       0     = no current COT extreme
+    """Return a transparent currency COT profile using release semantics.
 
-    Legacy Non-Commercial percentile is interpreted opposite to Commercials:
-    bullish reversal context -> NC low; bearish reversal context -> NC high.
+    V3.9.0 separates state from signal:
+      * an upper/lower COT extreme is a hedge STATE only;
+      * direction becomes active only during a Hedger RELEASE;
+      * the 1/4..4/4 count therefore uses RELEASE as gate 1.
     """
     cot = float(commercial_index) if _finite(commercial_index) else np.nan
-    comm = (
-        float(commercial_net_percentile)
-        if _finite(commercial_net_percentile)
-        else np.nan
-    )
-    nc = (
-        float(noncommercial_net_percentile)
-        if _finite(noncommercial_net_percentile)
-        else np.nan
-    )
-    retail = (
-        float(retail_net_percentile)
-        if _finite(retail_net_percentile)
-        else np.nan
-    )
+    comm = float(commercial_net_percentile) if _finite(commercial_net_percentile) else np.nan
+    nc = float(noncommercial_net_percentile) if _finite(noncommercial_net_percentile) else np.nan
+    retail = float(retail_net_percentile) if _finite(retail_net_percentile) else np.nan
 
-    direction = 0
-    cot_ok = False
-    comm_ok = False
-    nc_ok = False
-    retail_ok = False
+    phase = str(cycle_phase or "").upper()
+    direction = int(cycle_direction or 0) if phase == "RELEASE" else 0
+    extreme_dir = int(extreme_direction or 0)
+    release_ok = direction != 0
 
-    if np.isfinite(cot) and cot >= float(index_upper):
-        direction = 1
-        cot_ok = True
+    comm_ok = nc_ok = retail_ok = False
+    if direction > 0:
         comm_ok = np.isfinite(comm) and comm >= float(net_upper)
         nc_ok = np.isfinite(nc) and nc <= float(net_lower)
         retail_ok = np.isfinite(retail) and retail <= float(net_lower)
-
-    elif np.isfinite(cot) and cot <= float(index_lower):
-        direction = -1
-        cot_ok = True
+    elif direction < 0:
         comm_ok = np.isfinite(comm) and comm <= float(net_lower)
         nc_ok = np.isfinite(nc) and nc >= float(net_upper)
         retail_ok = np.isfinite(retail) and retail >= float(net_upper)
 
-    confirmations = (
-        int(cot_ok)
-        + int(comm_ok)
-        + int(nc_ok)
-        + int(retail_ok)
-    )
+    confirmations = int(release_ok) + int(comm_ok) + int(nc_ok) + int(retail_ok)
     signed_strength = int(direction * confirmations)
+    bias = "BULLISH" if direction > 0 else "BÄRISCH" if direction < 0 else "NEUTRAL"
 
-    bias = (
-        "BULLISH"
-        if direction > 0
-        else "BÄRISCH"
-        if direction < 0
-        else "NEUTRAL"
-    )
+    if phase == "EXTREME":
+        state_label = "FULL HEDGE" if extreme_dir > 0 else "LOW HEDGE" if extreme_dir < 0 else "EXTREM"
+        signal_label = "WAITING FOR RELEASE"
+    elif phase == "RELEASE":
+        state_label = str(cycle_state or "RELEASE")
+        signal_label = "BULLISH RELEASE" if direction > 0 else "BEARISH RELEASE"
+    else:
+        state_label = str(cycle_state or "NEUTRAL")
+        signal_label = "NO SIGNAL"
 
     return {
         "symbol": symbol,
@@ -128,11 +111,17 @@ def currency_cot_profile(
         "commercial_net_percentile": comm,
         "noncommercial_net_percentile": nc,
         "retail_net_percentile": retail,
+        "cycle_phase": phase or "NONE",
+        "cycle_state": str(cycle_state or ""),
+        "extreme_direction": extreme_dir,
+        "state_label": state_label,
+        "signal_label": signal_label,
         "direction": direction,
         "confirmations": confirmations,
         "signed_strength": signed_strength,
         "bias": bias,
-        "cot_ok": bool(cot_ok),
+        "cot_ok": bool(release_ok),
+        "release_ok": bool(release_ok),
         "commercial_ok": bool(comm_ok),
         "noncommercial_ok": bool(nc_ok),
         "retail_ok": bool(retail_ok),

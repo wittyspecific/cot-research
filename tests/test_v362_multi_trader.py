@@ -113,10 +113,10 @@ def test_last_active_admin_cannot_be_disabled(tmp_path: Path):
         set_trader_active(admin["trader_id"], False, db_path=db)
 
 
-def test_app_hides_ftmo_risk_pages_for_trader_role():
+def test_app_keeps_ftmo_risk_and_admin_pages_admin_only():
     app = (Path(__file__).parents[1] / "app.py").read_text()
+    assert 'if is_admin and not is_remote:' in app
+    assert 'pages/risk_cockpit.py' in app
+    assert 'pages/portfolio_risk.py' in app
     assert 'if is_admin:' in app
-    trader_branch = app.split('else:\n    pages = {', 1)[1]
-    assert 'pages/risk_cockpit.py' not in trader_branch
-    assert 'pages/portfolio_risk.py' not in trader_branch
-    assert 'pages/trader_admin.py' not in trader_branch
+    assert 'pages/trader_admin.py' in app

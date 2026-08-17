@@ -38,9 +38,25 @@ class FXRelativeTests(unittest.TestCase):
             commercial_net_percentile=91,
             noncommercial_net_percentile=7,
             retail_net_percentile=8,
+            cycle_phase="RELEASE",
+            cycle_direction=1,
+            extreme_direction=1,
+            cycle_state="BULLISH RELEASE",
         )
         self.assertEqual(row["signed_strength"], 4)
         self.assertTrue(row["noncommercial_ok"])
+
+
+    def test_full_hedge_extreme_is_state_not_signal(self):
+        row = currency_cot_profile(
+            symbol="CAD", market_name="Canadian Dollar", report_date=pd.Timestamp("2026-08-11"),
+            commercial_index=100, commercial_net_percentile=95, noncommercial_net_percentile=5, retail_net_percentile=10,
+            cycle_phase="EXTREME", cycle_direction=0, extreme_direction=1, cycle_state="FULL HEDGE · PERSISTENCE",
+        )
+        self.assertEqual(row["signed_strength"], 0)
+        self.assertEqual(row["bias"], "NEUTRAL")
+        self.assertEqual(row["state_label"], "FULL HEDGE")
+        self.assertEqual(row["signal_label"], "WAITING FOR RELEASE")
 
     def test_9_currencies_make_36_pairs(self):
         symbols = [

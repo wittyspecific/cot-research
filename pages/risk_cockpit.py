@@ -75,10 +75,10 @@ def _driver_note(row: pd.Series) -> str:
 
 
 page_header(
-    "Portfolio · Risk Cockpit",
+    "Admin · Risiko",
     "Risk Cockpit",
-    "Darf aktuell neues Risiko ins Portfolio?",
-    "V3.5.3 · QUICK RISK VIEW",
+    "Aktuelle Portfolio-Auslastung und Risikolimits auf einen Blick.",
+    "V3.9.0 · RISK COCKPIT",
 )
 
 mt5_section = _secret_section("mt5")

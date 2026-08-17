@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 
-from .analysis import enrich_cot
+from .analysis import enrich_cot, hedger_cycle_state
 from .cftc import load_cftc_universe, load_history, resolve_market
 from .config import (
     COMMERCIAL_RANGE_WEEKS,
@@ -69,6 +69,11 @@ def load_currency_cot_profiles() -> tuple[pd.DataFrame, pd.DataFrame]:
                 )
 
             latest = valid.iloc[-1]
+            cycle = hedger_cycle_state(
+                cot,
+                upper=INDEX_UPPER,
+                lower=INDEX_LOWER,
+            )
             profile = currency_cot_profile(
                 symbol=market["symbol"],
                 market_name=market["name"],
@@ -81,6 +86,10 @@ def load_currency_cot_profiles() -> tuple[pd.DataFrame, pd.DataFrame]:
                     "noncommercial_net_percentile"
                 ],
                 retail_net_percentile=latest["retail_net_percentile"],
+                cycle_phase=cycle.get("phase"),
+                cycle_direction=int(cycle.get("direction", 0) or 0),
+                extreme_direction=int(cycle.get("extreme_direction", 0) or 0),
+                cycle_state=str(cycle.get("state", "") or ""),
                 index_upper=INDEX_UPPER,
                 index_lower=INDEX_LOWER,
                 net_upper=NET_UPPER_PERCENTILE,

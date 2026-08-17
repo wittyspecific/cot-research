@@ -8,10 +8,10 @@ import pandas as pd
 class NCPercentileConfirmationRegressionTests(unittest.TestCase):
     def test_watchlist_uses_nc_as_fourth_condition(self):
         source = Path("pages/watchlist.py").read_text(encoding="utf-8")
-        self.assertIn('nc = float(row.get("noncommercial_net_percentile"', source)
-        self.assertIn('"nc_ok": bool(nc_ok)', source)
-        self.assertIn('"4/4 · VOLL"', source)
-        self.assertIn('"Non-Commercials": readable_value', source)
+        self.assertIn('nc = _finite(row.get("noncommercial_net_percentile"))', source)
+        self.assertIn('"nc_ok": nc_ok', source)
+        self.assertIn('"4/4 Voll"', source)
+        self.assertIn('"Non-Commercials": f', source)
 
     def test_watchlist_engine_exposes_nc_percentile(self):
         source = Path("src/watchlist.py").read_text(encoding="utf-8")
@@ -35,6 +35,7 @@ class NCPercentileConfirmationRegressionTests(unittest.TestCase):
             commercial_net_percentile=95,
             noncommercial_net_percentile=5,
             retail_net_percentile=10,
+            cycle_phase="RELEASE", cycle_direction=1, extreme_direction=1, cycle_state="BULLISH RELEASE",
         )
         self.assertEqual(row["confirmations"], 4)
         self.assertEqual(row["signed_strength"], 4)
@@ -50,6 +51,7 @@ class NCPercentileConfirmationRegressionTests(unittest.TestCase):
             commercial_net_percentile=5,
             noncommercial_net_percentile=95,
             retail_net_percentile=90,
+            cycle_phase="RELEASE", cycle_direction=-1, extreme_direction=-1, cycle_state="BEARISH RELEASE",
         )
         self.assertEqual(row["confirmations"], 4)
         self.assertEqual(row["signed_strength"], -4)

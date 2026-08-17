@@ -99,15 +99,13 @@ def _context_label(context: dict) -> str:
 
 
 page_header(
-    "Trading · Trade Planner",
-    "Trade Planner",
-    "Manuelle Supply-&-Demand-Idee eingeben; Research- und MT5-Kontext werden im selben Moment unveränderlich gespeichert.",
-    "V3.8.1.5.1 · MARKET AUTO-FILL & PRICE UNITS",
+    "Trading · Neuer Trade",
+    "Neuer Trade",
+    "Asset wählen, Setup definieren, Risiko prüfen, speichern.",
+    "V3.9.0 · SIMPLE TRADE FLOW",
 )
 
-st.caption(
-    "Der Planner eröffnet keine Positionen. Er erstellt ausschließlich REAL-/SIMULATIONS-/SKIPPED-Pläne und friert den damaligen Informationsstand für spätere Statistik ein."
-)
+st.caption("Keine echte Orderausführung: Der Planner dokumentiert deine Idee und friert den Research-Zustand im Hintergrund ein.")
 
 mt5_section = _secret_section("mt5")
 risk_section = _secret_section("risk")
@@ -187,7 +185,7 @@ else:
     ])
     st.caption("FTMO-Kontostand, offene Positionen und Portfolio-Risk des ADMIN werden in deinem Snapshot nicht gespeichert oder angezeigt.")
 
-with st.expander("Journal-Speicher", expanded=False):
+with st.expander("Technische Details · Speicherung", expanded=False):
     if is_remote:
         st.code("REMOTE_GATEWAY → lokale Master-SQLite auf dem Mac")
         definition(
@@ -201,7 +199,7 @@ with st.expander("Journal-Speicher", expanded=False):
             "Optional kann unter [journal] db_path in secrets.toml ein anderer lokaler Pfad gesetzt werden."
         )
 
-section_line("1 · Instrument & Entscheidung", "deine diskretionären Eingaben")
+section_line("1 · Asset", "Instrument, Richtung und Ordertyp")
 
 prefill = str(st.session_state.get("trade_plan_symbol", "") or "")
 default_index = symbols.index(prefill) if prefill in symbols else 0
@@ -249,8 +247,8 @@ with c3:
 with c4:
     metric_card("PLAN", plan_type, "REAL / SIMULATION / SKIPPED")
 
-section_line("TradingView Preview", "visuelle Analyse · MT5 bleibt Outcome-Quelle")
-with st.expander(f"TradingView Chart · {symbol}", expanded=True):
+section_line("Chart", "optional")
+with st.expander(f"TradingView Chart · {symbol}", expanded=False):
     tv_symbol = render_tradingview_chart(symbol, timeframe=timeframe, height=570)
     st.caption(
         f"TradingView-Mapping: {symbol} → {tv_symbol}. Der Chart dient nur der visuellen Analyse. "
@@ -274,7 +272,7 @@ with st.expander("COT-Zuordnung manuell überschreiben", expanded=False):
     else:
         st.caption("Automatische Zuordnung bleibt aktiv. FX-Paare speichern Base- und Quote-COT getrennt.")
 
-section_line("2 · Supply & Demand Plan", "Zone, Execution, Invalidierung, Target")
+section_line("2 · Setup", "Zone, SL, TP und Setup-Qualität")
 
 # Sensible display defaults only; the user remains the source of the actual S&D levels.
 base_price = float(mark) if np.isfinite(mark) and mark > 0 else 1.0
@@ -373,13 +371,13 @@ with m2:
 with m3:
     metric_card("SNAPSHOT", "IMMUTABLE", "wird beim Speichern eingefroren")
 
-section_line("3 · Speichern", "Snapshot wird genau jetzt erstellt")
+section_line("3 · Bestätigen", "Research-Snapshot wird automatisch im Hintergrund gespeichert")
 st.caption(
     "Beim Speichern werden Research, COT-Kontext, Supply-&-Demand-Plan und CFD-Symbolmetadaten eingefroren. "
     + ("FTMO-Kontostand, Positionen, Live-Quotes und Portfolio-Risk bleiben im Online-Modus lokal auf dem Mac." if is_remote else "In der lokalen ADMIN-Instanz werden zusätzlich Kontostand, offene Positionen und Risk-Desk-Zustand eingefroren.")
 )
 
-if st.button("Trade-Plan + vollständigen Snapshot speichern", type="primary", use_container_width=True):
+if st.button("Trade speichern", type="primary", use_container_width=True):
     plan = {
         "plan_type": plan_type,
         "order_type": order_type,

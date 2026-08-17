@@ -8,10 +8,10 @@ class SemanticChartColorSourceTests(unittest.TestCase):
         cls.source = (Path(__file__).resolve().parents[1] / "src" / "style.py").read_text()
 
     def test_semantic_palette_is_defined(self):
-        self.assertIn('"commercial": "#19C7FF"', self.source)
-        self.assertIn('"noncommercial": "#FF9D00"', self.source)
-        self.assertIn('"retail": "#9BE600"', self.source)
-        self.assertIn('"speculative": "#B887FF"', self.source)
+        self.assertIn('"commercial": "#16A34A"', self.source)
+        self.assertIn('"noncommercial": "#2563EB"', self.source)
+        self.assertIn('"retail": "#F59E0B"', self.source)
+        self.assertIn('"speculative": "#7C3AED"', self.source)
 
     def test_noncommercial_mapping_precedes_commercial_mapping(self):
         noncommercial = self.source.index('if "non-commercial" in name or "noncommercial" in name:')

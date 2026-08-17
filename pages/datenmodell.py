@@ -109,10 +109,10 @@ def fmt_date(value):
 
 
 page_header(
-    "Kontrollansicht · CFTC-Rohdaten",
+    "Advanced · Datenmodell",
     "CFTC Datenmodell",
-    "Welche Händlergruppen und Normalisierungen liegen unter der Marktanalyse?",
-    "UI HOTFIX · V3.3.1",
+    "Rohdaten, Händlergruppen und Normalisierung nachvollziehbar prüfen.",
+    "V3.9.0 · ADVANCED RESEARCH",
 )
 
 back_col, detail_col, research_col = st.columns([0.28, 0.36, 0.36])
