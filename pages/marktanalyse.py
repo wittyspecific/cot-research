@@ -876,6 +876,150 @@ _inst = dict(regime_cross.get("institutional") or {})
 _trend = dict(regime_cross.get("trend") or {})
 _nr = dict(regime_cross.get("nonreportable") or {})
 
+def _regime_ui_safe(value) -> str:
+    return (
+        str(value if value is not None else "—")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def _regime_trader_next_step(stage: int, cycle_phase: str, nonreportable_contrarian: bool) -> str:
+    if stage <= 0:
+        return "Warten: Ein Commercial-156W-Extrem muss zuerst einen aktiven Positionierungszyklus eröffnen."
+    if stage == 1:
+        return "Warten: Der Commercial-Hedge muss beginnen, sich aus dem Extrem zu lösen."
+    if stage == 2:
+        return "Warten: Institutionelle Gruppe und Trend-Funds müssen den möglichen Regimewechsel bestätigen."
+    if stage == 3:
+        if str(cycle_phase).upper() != "RELEASE":
+            return "Warten: Der Commercial muss die Extremzone tatsächlich verlassen und den Release bestätigen."
+        if not nonreportable_contrarian:
+            return "Warten: Der Nonreportable-Kontext muss die Gegenseite des neuen Regimes bestätigen."
+        return "Warten: Die Positionierungsbedingungen für REGIME CONFIRMED sind noch nicht vollständig."
+    if stage == 4:
+        return "Warten: Die Preisstruktur muss das bestätigte Positionierungsregime nachvollziehen."
+    return "Kontext vollständig entwickelt: Jetzt separat S&D-Zone, Entry, SL, TP und Risiko prüfen."
+
+
+def _render_regime_trader_overview() -> None:
+    stage = int(regime_stage.get("stage", 0) or 0)
+    stage = max(0, min(5, stage))
+    direction = int(np.sign(context_direction))
+    direction_label = "BULLISH" if direction > 0 else "BEARISH" if direction < 0 else "NEUTRAL"
+    direction_class = "bull" if direction > 0 else "bear" if direction < 0 else "neutral"
+    current_label = str(regime_stage.get("label", "NORMAL") or "NORMAL")
+
+    inst_label = str(regime_cross.get("institutional_label", "Institutionell") or "Institutionell")
+    trend_label = str(regime_cross.get("trend_label", "Trend-Funds") or "Trend-Funds")
+    nr_contrarian = bool(_nr.get("contrarian", False))
+
+    phase_rows = [
+        (
+            1,
+            "EXTREME WATCH",
+            f"Commercial 156W: {comm_net_pct:.1f}. Perzentil · {de_status(cycle.get('state', positioning['state']))}",
+        ),
+        (
+            2,
+            "IN TRANSITION",
+            f"{de_status(cycle.get('transition', '—'))} · Δ1W {cycle.get('percentile_change_1w', np.nan):+.1f} · Δ2W {cycle.get('percentile_change_2w', np.nan):+.1f} · Δ4W {cycle.get('percentile_change_4w', np.nan):+.1f}",
+        ),
+        (
+            3,
+            "CROSS-GROUP SHIFT",
+            f"{inst_label}: {_inst.get('label', 'WARTET')} · {trend_label}: {_trend.get('label', 'WARTET')}",
+        ),
+        (
+            4,
+            "REGIME CONFIRMED",
+            f"Commercial Release: {'BESTÄTIGT' if str(cycle.get('phase', '')).upper() == 'RELEASE' else 'WARTET'} · Nonreportable: {_nr.get('label', 'WARTET')}",
+        ),
+        (
+            5,
+            "CONTEXT READY",
+            f"Preisstruktur: {regime_price.get('label', '—')}",
+        ),
+    ]
+
+    rows_html = []
+    for number, label, detail in phase_rows:
+        if stage > number:
+            state_class, marker, state_text = "done", "✓", "abgeschlossen"
+        elif stage == number:
+            state_class, marker, state_text = "current", "●", "aktuell"
+        else:
+            state_class, marker, state_text = "waiting", "○", "wartet"
+        rows_html.append(
+            '<div class="ma-regime-row ' + state_class + '">'
+            '<div class="ma-regime-marker">' + marker + '</div>'
+            '<div class="ma-regime-row-body">'
+            f'<div class="ma-regime-row-title"><span>{number} · {_regime_ui_safe(label)}</span><small>{_regime_ui_safe(state_text)}</small></div>'
+            f'<div class="ma-regime-row-detail">{_regime_ui_safe(detail)}</div>'
+            '</div></div>'
+        )
+
+    next_step = _regime_trader_next_step(stage, str(cycle.get("phase", "")), nr_contrarian)
+    season_compact = str(market_multi_seasonality_summary.get("compact", "—") or "—")
+    season_overall = str(market_multi_seasonality_summary.get("overall", "N/V") or "N/V")
+    market_label = MARKET_NAME_DE.get(market["name"], market["name"])
+
+    stage_explanation = {
+        0: "Kein aktiver Positionierungszyklus.",
+        1: "Commercials sind historisch extrem; daraus entsteht noch kein Signal.",
+        2: "Der Commercial-Hedge beginnt sich zu lösen; der Regimewechsel ist noch unbestätigt.",
+        3: "Andere CFTC-Gruppen reagieren bereits; der vollständige Positionierungs-Release fehlt noch.",
+        4: "Das Positionierungsregime ist bestätigt; die Preisbestätigung fehlt noch.",
+        5: "Positionierung und Preisstruktur bestätigen denselben Kontext.",
+    }.get(stage, "")
+
+    st.html(
+        f"""
+        <style>
+        .ma-regime-card{{background:#fff;border:1px solid #e3e8ef;border-radius:14px;padding:20px 22px;margin:14px 0 18px;box-shadow:0 1px 2px rgba(15,23,42,.025);max-width:920px}}
+        .ma-regime-eyebrow{{font-size:10px;font-weight:750;letter-spacing:.08em;text-transform:uppercase;color:#667085;margin-bottom:7px}}
+        .ma-regime-headline{{font-size:24px;line-height:1.2;font-weight:760;color:#101828;margin:0 0 5px}}
+        .ma-regime-headline .bull{{color:#15803d}}.ma-regime-headline .bear{{color:#dc2626}}.ma-regime-headline .neutral{{color:#667085}}
+        .ma-regime-stage{{font-size:12px;font-weight:700;color:#475467;margin-bottom:5px}}
+        .ma-regime-summary{{font-size:12px;color:#667085;line-height:1.55;margin-bottom:17px}}
+        .ma-regime-flow{{display:flex;flex-direction:column;gap:7px}}
+        .ma-regime-row{{display:flex;align-items:flex-start;gap:11px;border:1px solid #eef1f5;border-radius:9px;padding:10px 12px;background:#fbfcfd}}
+        .ma-regime-row.done{{background:#f7fbf8;border-color:#e0f1e4}}.ma-regime-row.current{{background:#f0fdf4;border-color:#bbebc8;box-shadow:inset 3px 0 0 #16a34a}}.ma-regime-row.waiting{{opacity:.68}}
+        .ma-regime-marker{{width:19px;min-width:19px;height:19px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;background:#eef2f6;color:#98a2b3;margin-top:1px}}
+        .ma-regime-row.done .ma-regime-marker{{background:#dcfce7;color:#15803d}}.ma-regime-row.current .ma-regime-marker{{background:#16a34a;color:#fff}}
+        .ma-regime-row-body{{min-width:0;flex:1}}.ma-regime-row-title{{display:flex;justify-content:space-between;gap:12px;align-items:baseline;font-size:11px;font-weight:760;color:#344054}}
+        .ma-regime-row-title small{{font-size:9px;color:#98a2b3;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}}
+        .ma-regime-row-detail{{font-size:10px;color:#667085;line-height:1.5;margin-top:3px;overflow-wrap:anywhere}}
+        .ma-regime-next{{margin-top:14px;border:1px solid #dce7f5;background:#f8fbff;border-radius:9px;padding:11px 12px}}
+        .ma-regime-next-label{{font-size:9px;font-weight:750;letter-spacing:.06em;text-transform:uppercase;color:#667085;margin-bottom:3px}}.ma-regime-next-text{{font-size:12px;font-weight:650;color:#344054;line-height:1.45}}
+        .ma-regime-context{{margin-top:10px;border-top:1px solid #eef1f5;padding-top:10px;display:flex;flex-direction:column;gap:5px;font-size:10px;color:#667085}}
+        .ma-regime-context strong{{color:#344054}}.ma-regime-foot{{font-size:9px;color:#98a2b3;margin-top:8px}}
+        @media(max-width:700px){{.ma-regime-card{{padding:16px}}.ma-regime-headline{{font-size:20px}}.ma-regime-row-title{{display:block}}.ma-regime-row-title small{{display:block;margin-top:2px}}}}
+        </style>
+        <div class="ma-regime-card">
+          <div class="ma-regime-eyebrow">Positioning Regime · {_regime_ui_safe(market_label)}</div>
+          <div class="ma-regime-headline"><span class="{direction_class}">{_regime_ui_safe(direction_label)}</span> · {_regime_ui_safe(current_label)}</div>
+          <div class="ma-regime-stage">PHASE {stage} / 5</div>
+          <div class="ma-regime-summary">{_regime_ui_safe(stage_explanation)}</div>
+          <div class="ma-regime-flow">{''.join(rows_html)}</div>
+          <div class="ma-regime-next">
+            <div class="ma-regime-next-label">Nächste Trader-Entscheidung</div>
+            <div class="ma-regime-next-text">{_regime_ui_safe(next_step)}</div>
+          </div>
+          <div class="ma-regime-context">
+            <div><strong>Preis:</strong> {_regime_ui_safe(regime_price.get('label', '—'))}</div>
+            <div><strong>Saisonalität 20/40/60T:</strong> {_regime_ui_safe(season_compact)} · {_regime_ui_safe(season_overall)}</div>
+          </div>
+          <div class="ma-regime-foot">Saisonalität bleibt separate Confluence und verändert die Regime-Phase nicht. CONTEXT READY ist noch kein Trade.</div>
+        </div>
+        """
+    )
+
+
+_render_regime_trader_overview()
+
 stage_summary(
     [
         {

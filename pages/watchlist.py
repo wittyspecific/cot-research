@@ -429,6 +429,219 @@ def _render_table(df: pd.DataFrame):
     st.html(html)
 
 
+def _trader_direction_label(row: pd.Series) -> tuple[str, str]:
+    direction = int(row.get("expected_direction", 0) or 0)
+    stage = int(row.get("regime_stage", 0) or 0)
+    if direction > 0:
+        return ("BULLISH" if stage >= 4 else "BULLISH WATCH", "bull")
+    if direction < 0:
+        return ("BEARISH" if stage >= 4 else "BEARISH WATCH", "bear")
+    return ("NEUTRAL", "neutral")
+
+
+def _trader_phase_summary(stage: int) -> str:
+    return {
+        1: "Commercials historisch extrem",
+        2: "Hedge beginnt sich zu lösen",
+        3: "Weitere CFTC-Gruppen drehen mit",
+        4: "Positionierungsregime bestätigt",
+        5: "Positionierung + Preis bestätigt",
+    }.get(int(stage), "Kein aktiver Regime-Zyklus")
+
+
+def _trader_next_step(row: pd.Series) -> str:
+    stage = int(row.get("regime_stage", 0) or 0)
+    if stage <= 0:
+        return "Auf neues 156W-Extrem warten"
+    if stage == 1:
+        return "Auf Transition warten"
+    if stage == 2:
+        return "Auf Cross-Group Shift warten"
+    if stage == 3:
+        if str(row.get("cycle_phase", "")).upper() != "RELEASE":
+            return "Auf Commercial Release warten"
+        if not bool(row.get("institutional_aligned", False)):
+            return "Institutionelle Bestätigung fehlt"
+        if not bool(row.get("trend_group_aligned", False)):
+            return "Trend-Funds-Bestätigung fehlt"
+        if not bool(row.get("nonreportable_contrarian", False)):
+            return "Konträrer Kontext fehlt"
+        return "Auf vollständige Regime-Bestätigung warten"
+    if stage == 4:
+        return "Auf Preisbestätigung warten"
+    return "S&D-Setup prüfen"
+
+
+def _trader_context(row: pd.Series) -> str:
+    stage = int(row.get("regime_stage", 0) or 0)
+    if stage < 4:
+        return '<span class="tw-muted">—</span>'
+
+    price = escape(str(row.get("price_state", "—")))
+    season = escape(str(row.get("season_overall", "N/V")))
+    price_cls = _tone_class(str(row.get("price_tone", "neutral")))
+
+    if stage >= 5:
+        return (
+            f'<span class="tw-context-ok">✓ Preis · {price}</span>'
+            f'<div class="tw-context-sub">Saison · {season}</div>'
+        )
+
+    return (
+        f'<span class="rg-chip {price_cls}">{price}</span>'
+        f'<div class="tw-context-sub">Saison · {season}</div>'
+    )
+
+
+def _trader_rows_html(df: pd.DataFrame) -> str:
+    rows = []
+    for _, row in df.iterrows():
+        symbol = escape(str(row.get("symbol", "")))
+        name = escape(str(market_name_de(row.get("market_name", ""))))
+        asset_class = escape(str(row.get("asset_class", "")))
+        stage = int(row.get("regime_stage", 0) or 0)
+        stage_label = escape(str(row.get("regime_status", "NORMAL")))
+        direction_label, direction_class = _trader_direction_label(row)
+        summary = escape(_trader_phase_summary(stage))
+        next_step = escape(_trader_next_step(row))
+
+        rows.append(
+            f"""
+            <tr>
+              <td>
+                <div class="tw-market">
+                  <span class="tw-star">☆</span>
+                  <div>
+                    <a href="?open_market={symbol}">{name}</a>
+                    <div class="tw-sub">{symbol} · {asset_class}</div>
+                  </div>
+                </div>
+              </td>
+              <td>
+                <div class="tw-direction {direction_class}">{escape(direction_label)}</div>
+              </td>
+              <td>
+                <div class="tw-phase-head">
+                  <strong>{stage_label}</strong>
+                  <span>{stage}/5</span>
+                </div>
+                {_stage_dots(stage)}
+              </td>
+              <td>
+                <div class="tw-summary">{summary}</div>
+              </td>
+              <td>
+                <div class="tw-next">{next_step}</div>
+              </td>
+              <td>
+                {_trader_context(row)}
+              </td>
+              <td class="tw-open">›</td>
+            </tr>
+            """
+        )
+    return "".join(rows)
+
+
+def _render_trader_table(df: pd.DataFrame):
+    if df.empty:
+        empty_state(
+            "Keine Märkte in dieser Phase",
+            "Für den aktuellen Report erfüllt kein Markt diesen Pipeline-Zustand.",
+        )
+        return
+
+    st.html(
+        f"""
+        <style>
+        .tw-wrap{{
+            background:#fff;
+            border:1px solid #e3e8ef;
+            border-radius:13px;
+            overflow:hidden;
+            box-shadow:0 1px 2px rgba(15,23,42,.025);
+        }}
+        table.tw-table{{
+            width:100%;
+            border-collapse:collapse;
+            table-layout:fixed;
+            color:#344054;
+        }}
+        .tw-table th{{
+            background:#fbfcfe;
+            color:#667085;
+            font-size:9px;
+            font-weight:750;
+            letter-spacing:.055em;
+            text-transform:uppercase;
+            text-align:left;
+            padding:11px 12px;
+            border-bottom:1px solid #e6eaf0;
+        }}
+        .tw-table td{{
+            padding:14px 12px;
+            border-bottom:1px solid #eef1f5;
+            vertical-align:middle;
+            background:#fff;
+        }}
+        .tw-table tr:last-child td{{border-bottom:0}}
+        .tw-table tr:hover td{{background:#fbfdfb}}
+        .tw-market{{display:flex;align-items:center;gap:9px}}
+        .tw-star{{font-size:15px;color:#98a2b3}}
+        .tw-market a{{font-size:12px;color:#101828;text-decoration:none;font-weight:720}}
+        .tw-market a:hover{{color:#16a34a}}
+        .tw-sub{{font-size:9px;color:#98a2b3;margin-top:3px}}
+        .tw-direction{{font-size:10px;font-weight:800;letter-spacing:.025em}}
+        .tw-direction.bull{{color:#15803d}}
+        .tw-direction.bear{{color:#dc2626}}
+        .tw-direction.neutral{{color:#667085}}
+        .tw-phase-head{{display:flex;align-items:center;justify-content:space-between;gap:8px}}
+        .tw-phase-head strong{{font-size:10px;color:#344054}}
+        .tw-phase-head span{{font-size:9px;color:#98a2b3}}
+        .tw-summary{{font-size:11px;font-weight:630;color:#475467;line-height:1.4}}
+        .tw-next{{font-size:11px;font-weight:700;color:#101828;line-height:1.4}}
+        .tw-context-ok{{font-size:10px;font-weight:750;color:#15803d}}
+        .tw-context-sub{{font-size:9px;color:#98a2b3;margin-top:4px}}
+        .tw-muted{{font-size:11px;color:#c0c7d1}}
+        .tw-open{{text-align:right;color:#98a2b3;font-size:19px}}
+        .tw-table .rg-stagebar{{max-width:120px;margin-top:7px}}
+        .tw-table th:nth-child(1){{width:17%}}
+        .tw-table th:nth-child(2){{width:12%}}
+        .tw-table th:nth-child(3){{width:17%}}
+        .tw-table th:nth-child(4){{width:19%}}
+        .tw-table th:nth-child(5){{width:22%}}
+        .tw-table th:nth-child(6){{width:11%}}
+        .tw-table th:nth-child(7){{width:2%}}
+        @media(max-width:1050px){{
+            .tw-table th:nth-child(4),.tw-table td:nth-child(4){{display:none}}
+            .tw-table th:nth-child(1){{width:22%}}
+            .tw-table th:nth-child(2){{width:15%}}
+            .tw-table th:nth-child(3){{width:22%}}
+            .tw-table th:nth-child(5){{width:25%}}
+            .tw-table th:nth-child(6){{width:14%}}
+            .tw-table th:nth-child(7){{width:2%}}
+        }}
+        </style>
+        <div class="tw-wrap">
+          <table class="tw-table">
+            <thead>
+              <tr>
+                <th>Markt</th>
+                <th>Richtung</th>
+                <th>Regime</th>
+                <th>Was passiert?</th>
+                <th>Nächster Schritt</th>
+                <th>Kontext</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>{_trader_rows_html(df)}</tbody>
+          </table>
+        </div>
+        """
+    )
+
+
 _pipeline_css()
 page_header(
     "Research · Positioning Regime",
@@ -499,7 +712,15 @@ else:
     elif direction_filter == "Bearish Reversal":
         filtered = filtered[pd.to_numeric(filtered["expected_direction"], errors="coerce") < 0]
 
-    _render_table(filtered.reset_index(drop=True))
+    trader_view = filtered.reset_index(drop=True)
+    _render_trader_table(trader_view)
+
+    with st.expander("Quant-Details · COT-Gruppen & Rohdaten", expanded=False):
+        st.caption(
+            "Vollständige Research-Ansicht für Quant-Kontrolle. "
+            "Die Trader-Watchlist oben verwendet ausschließlich die bereits berechnete Regime-Verdichtung."
+        )
+        _render_table(trader_view)
 
     with st.expander("Pipeline-Logik & 1–4W-Beobachtung", expanded=False):
         st.markdown(f"""
