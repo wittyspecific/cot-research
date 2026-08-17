@@ -10,7 +10,7 @@ from src.deployment_mode import REMOTE_GATEWAY, deployment_config_from_mapping
 from src.ftmo_risk import risk_config_from_mapping
 from src.journal_gateway_client import JournalGatewayClient, JournalGatewayError, config_from_mapping as gateway_config_from_mapping
 from src.prop_gateway_compat import prop_account as remote_prop_account
-from src.price_units import mt5_price_to_plan, planner_digits, price_unit_note
+from src.price_units import auto_market_reference_entry, mt5_price_to_plan, planner_digits, price_unit_note
 from src.mt5_account import (
     MT5BridgeError,
     MT5ConfigError,
@@ -404,6 +404,12 @@ if st.button("Trade-Plan + vollständigen Snapshot speichern", type="primary", u
         "quality_grade": quality,
         "notes": notes,
     }
+    if order_type == "MARKET":
+        # The UI intentionally has no manual MARKET entry. Some legacy snapshot/schema
+        # paths still require a finite numeric value, so provide an immutable zone-mid
+        # reference for compatibility only. Execution ignores it and uses live Ask/Bid.
+        plan["entry"] = auto_market_reference_entry(plan)
+        plan["market_entry_auto"] = True
     try:
         with st.spinner("Research- und Risk-Snapshot wird eingefroren …"):
             payload = collect_trade_snapshot(
