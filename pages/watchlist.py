@@ -1,4 +1,5 @@
 from __future__ import annotations
+# V3.14.7 · MACRO MICRO FILTERS
 # V3.14.5 · FRESH MICRO TRIGGER
 # V3.14.4 · STATUS AGE
 
@@ -532,6 +533,99 @@ def _ensure_fresh_micro_rows(
     if appended:
         base = pd.concat([base, pd.DataFrame(appended)], ignore_index=True, sort=False)
     return base.reset_index(drop=True)
+
+def _apply_macro_micro_filters(
+    frame: pd.DataFrame,
+    macro_filter: str,
+    micro_filter: str,
+) -> pd.DataFrame:
+    """Trader-facing filters derived from the same decision core as the table."""
+    if frame is None or frame.empty:
+        return frame
+
+    keep = []
+    for _, filter_row in frame.iterrows():
+        decision = classify_macro_micro_trade(filter_row)
+        macro = dict(decision.get("macro") or {})
+        micro = dict(decision.get("micro") or {})
+
+        macro_phase = str(macro.get("phase", "") or "").upper()
+        micro_direction = int(micro.get("direction", 0) or 0)
+        micro_fresh = bool(micro.get("fresh", False))
+
+        macro_ok = (
+            macro_filter == "Alle Makro"
+            or macro_phase == str(macro_filter).upper()
+        )
+
+        if micro_filter == "Alle Mikro":
+            micro_ok = True
+        elif micro_filter == "BULLISH TRIGGER":
+            micro_ok = micro_direction > 0
+        elif micro_filter == "BEARISH TRIGGER":
+            micro_ok = micro_direction < 0
+        elif micro_filter == "FRESH BULLISH":
+            micro_ok = micro_direction > 0 and micro_fresh
+        elif micro_filter == "FRESH BEARISH":
+            micro_ok = micro_direction < 0 and micro_fresh
+        elif micro_filter == "KEIN TRIGGER":
+            micro_ok = micro_direction == 0
+        else:
+            micro_ok = True
+
+        keep.append(bool(macro_ok and micro_ok))
+
+    return frame[pd.Series(keep, index=frame.index)]
+
+
+def _micro_runtime_health(frame: pd.DataFrame) -> dict:
+    """Minimal deployment diagnostic; never changes trading decisions."""
+    if frame is None or frame.empty:
+        return {
+            "rows": 0,
+            "metadata": False,
+            "trigger_rows": 0,
+            "fresh_rows": 0,
+            "current_extremes_90_10": 0,
+        }
+
+    metadata = "micro_trigger_direction" in frame.columns
+
+    if metadata:
+        direction = pd.to_numeric(
+            frame["micro_trigger_direction"],
+            errors="coerce",
+        ).fillna(0)
+        trigger_rows = int(direction.ne(0).sum())
+    else:
+        trigger_rows = 0
+
+    if "micro_trigger_fresh" in frame.columns:
+        fresh_rows = int(
+            frame["micro_trigger_fresh"].fillna(False).astype(bool).sum()
+        )
+    else:
+        fresh_rows = 0
+
+    if "micro_current_index_26w" in frame.columns:
+        current_source = frame["micro_current_index_26w"]
+    elif "commercial_index" in frame.columns:
+        current_source = frame["commercial_index"]
+    else:
+        current_source = pd.Series(index=frame.index, dtype=float)
+
+    current = pd.to_numeric(current_source, errors="coerce")
+    current_extremes = int(
+        ((current >= 90.0) | (current <= 10.0)).sum()
+    )
+
+    return {
+        "rows": int(len(frame)),
+        "metadata": bool(metadata),
+        "trigger_rows": trigger_rows,
+        "fresh_rows": fresh_rows,
+        "current_extremes_90_10": current_extremes,
+    }
 
 def _kpis(df: pd.DataFrame, report_date):
     """V3.14.2 · Release-priority macro/micro KPIs."""
@@ -1559,6 +1653,35 @@ else:
     with c3:
         direction_filter = st.selectbox("Richtung", ["Alle Richtungen", "Bullish Reversal", "Bearish Reversal"], label_visibility="collapsed")
 
+    f_macro, f_micro = st.columns(2, gap="small")
+    with f_macro:
+        macro_filter = st.selectbox(
+            "Makro-Phase",
+            [
+                "Alle Makro",
+                "EXTREME",
+                "TRANSITION",
+                "RELEASE",
+                "CONFIRMED",
+            ],
+            label_visibility="collapsed",
+            key="watchlist_macro_phase_filter",
+        )
+    with f_micro:
+        micro_filter = st.selectbox(
+            "Mikro-Trigger",
+            [
+                "Alle Mikro",
+                "FRESH BULLISH",
+                "FRESH BEARISH",
+                "BULLISH TRIGGER",
+                "BEARISH TRIGGER",
+                "KEIN TRIGGER",
+            ],
+            label_visibility="collapsed",
+            key="watchlist_micro_trigger_filter",
+        )
+
     filtered = pipeline.copy()
 
     if view == "Fresh Micro":
@@ -1581,6 +1704,11 @@ else:
         filtered = filtered[
             pd.to_numeric(filtered["regime_stage"], errors="coerce").fillna(0) >= 5
         ]
+    filtered = _apply_macro_micro_filters(
+        filtered,
+        macro_filter,
+        micro_filter,
+    )
     if segment != "Alle":
         filtered = filtered[filtered["segment"].astype(str).eq(segment)]
     if direction_filter == "Bullish Reversal":
@@ -1589,6 +1717,29 @@ else:
         filtered = filtered[pd.to_numeric(filtered["expected_direction"], errors="coerce") < 0]
 
     trader_view = filtered.reset_index(drop=True)
+    _micro_health = _micro_runtime_health(pipeline)
+    if (
+        _micro_health["rows"] > 0
+        and _micro_health["current_extremes_90_10"] > 0
+        and _micro_health["trigger_rows"] == 0
+    ):
+        with st.expander("Mikro-Datencheck", expanded=False):
+            st.warning(
+                "Diese Runtime sieht aktuelle 90/10-COT-Extreme, aber keine "
+                "historischen Mikro-Trigger. Wenn lokal Trigger erscheinen, "
+                "online aber nur '—', laufen Deployment und lokaler Scan "
+                "wahrscheinlich nicht mit demselben Daten-/Cache-Stand."
+            )
+            st.caption(
+                f"Zeilen: {_micro_health['rows']} · "
+                f"aktuelle 90/10-Extreme: "
+                f"{_micro_health['current_extremes_90_10']} · "
+                f"historische Trigger: {_micro_health['trigger_rows']} · "
+                f"Fresh: {_micro_health['fresh_rows']} · "
+                f"Trigger-Metadaten vorhanden: "
+                f"{'ja' if _micro_health['metadata'] else 'nein'}"
+            )
+
     _render_trader_table(trader_view)
 
     with st.expander("Quant-Details · COT-Gruppen & Rohdaten", expanded=False):
