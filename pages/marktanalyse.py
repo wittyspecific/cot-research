@@ -1,5 +1,7 @@
 
 from __future__ import annotations
+# V3.14.8 · NC MICRO CHART HOTFIX
+# V3.14.8 · MARKET ANALYSIS CURRENT LOGIC
 
 import numpy as np
 import pandas as pd
@@ -58,6 +60,15 @@ from src.cftc_reports import (
     resolve_report_market,
 )
 from src.markets import CLASSIC_MARKETS
+from src.micro_trigger import (
+    MICRO_TRIGGER_FRESH_WEEKS,
+    MICRO_TRIGGER_LOWER,
+    MICRO_TRIGGER_UPPER,
+    latest_micro_trigger,
+)
+from src.status_age import macro_status_age_weeks
+from src.watchlist_macro_micro import classify_macro_micro_trade
+from src.watchlist_seasonality import calculate_market_20y_multi_seasonality
 from src.prices import load_prices, price_alignment_audit
 from src.publication import publication_info
 from src.report_analysis import enrich_report_positioning
@@ -279,8 +290,8 @@ def de_nearest(value):
 page_header(
     "Research · Markt",
     "COT Marktanalyse",
-    "Zustand, Hedge-Release und Bestätigung klar getrennt.",
-    "V3.10.0 · POSITIONING REGIME",
+    "Aktueller Trade-Kontext und Research-Ebenen klar getrennt.",
+    "V3.14.8 · CURRENT TRADE CONTEXT",
 )
 
 nav_back_col, nav_hint_col = st.columns([0.22, 0.78])
@@ -648,6 +659,60 @@ regime_stage = classify_regime_stage(
     price=regime_price,
 )
 
+market_micro_trigger = latest_micro_trigger(
+    cot,
+    upper=MICRO_TRIGGER_UPPER,
+    lower=MICRO_TRIGGER_LOWER,
+    fresh_weeks=MICRO_TRIGGER_FRESH_WEEKS,
+)
+
+market_macro_age_weeks = macro_status_age_weeks(
+    cot,
+    cycle,
+    upper=validation_upper,
+    lower=validation_lower,
+)
+
+market_trader_decision = classify_macro_micro_trade(
+    {
+        "context_direction": int(context_direction),
+        "cycle_phase": str(cycle.get("phase", "") or ""),
+        "transition_state": str(cycle.get("transition", "") or ""),
+        "regime_stage": int(regime_stage.get("stage", 0) or 0),
+        "micro_trigger_direction": int(
+            market_micro_trigger.get("direction", 0) or 0
+        ),
+        "micro_trigger_age_weeks": int(
+            market_micro_trigger.get("age_weeks", -1)
+        ),
+        "micro_trigger_fresh": bool(
+            market_micro_trigger.get("fresh", False)
+        ),
+        "micro_trigger_value": market_micro_trigger.get(
+            "trigger_value", np.nan
+        ),
+        "micro_current_index_26w": market_micro_trigger.get(
+            "current_value", np.nan
+        ),
+    }
+)
+
+_market_trade_bias_direction = int(
+    market_trader_decision.get("bias_direction", 0) or 0
+)
+
+if _market_trade_bias_direction != 0:
+    market_trader_seasonality = calculate_market_20y_multi_seasonality(
+        ticker=str(market.get("ticker", "") or ""),
+        cot_direction=_market_trade_bias_direction,
+    )
+else:
+    market_trader_seasonality = {
+        "overall": "N/V",
+        "compact": "— N/V",
+        "detail": "Kein aktiver Trade-Bias",
+    }
+
 # V3.13A · Research-informed FX overlay.
 # 156W Net/OI + soft 75/25 + raw Dealer release velocity 1–2W.
 # Existing 80/20 production gates, FTMO risk and execution remain unchanged.
@@ -917,47 +982,111 @@ def _regime_trader_next_step(stage: int, cycle_phase: str, nonreportable_contrar
 
 
 def _render_research_trader_overlay() -> None:
-    if not bool(trader_overlay.get("calibrated", False)):
-        return
+    """V3.14.8 · same trader decision contract as the Watchlist."""
+    decision = dict(market_trader_decision or {})
+    macro = dict(decision.get("macro") or {})
+    micro = dict(decision.get("micro") or {})
 
-    bias = _regime_ui_safe(trader_overlay.get("bias", "NEUTRAL"))
-    confidence = _regime_ui_safe(trader_overlay.get("confidence", "WATCH"))
-    timing = _regime_ui_safe(trader_overlay.get("timing", "WAITING"))
-    action = _regime_ui_safe(trader_overlay.get("action", "WARTEN"))
-    pct = research_fx.get("dealer_net_oi_percentile_156w", np.nan)
-    v1 = research_fx.get("release_velocity_1w", np.nan)
-    v2 = research_fx.get("release_velocity_2w", np.nan)
-    flow = _regime_ui_safe(research_fx.get("flow_support", "—"))
+    macro_label = _regime_ui_safe(macro.get("label", "—"))
+    micro_label = _regime_ui_safe(micro.get("label", "—"))
+    bias = _regime_ui_safe(decision.get("bias", "WAIT"))
+    plan = _regime_ui_safe(decision.get("plan", "Warten"))
+    signal_label = _regime_ui_safe(decision.get("signal", "NEUTRAL"))
 
-    pct_txt = "—" if pd.isna(pct) else f"{float(pct):.1f}"
-    v1_txt = "—" if pd.isna(v1) else f"{float(v1):+,.0f}"
-    v2_txt = "—" if pd.isna(v2) else f"{float(v2):+,.0f}"
+    macro_phase = str(macro.get("phase", "") or "").upper()
+    if int(market_macro_age_weeks or 0) > 0:
+        macro_age_text = (
+            f"Release seit {int(market_macro_age_weeks)}W"
+            if macro_phase == "CONFIRMED"
+            else f"seit {int(market_macro_age_weeks)}W"
+        )
+    else:
+        macro_age_text = "—"
+
+    micro_direction = int(micro.get("direction", 0) or 0)
+    micro_age = int(micro.get("age_weeks", -1))
+    micro_fresh = bool(micro.get("fresh", False))
+
+    if micro_direction == 0:
+        micro_age_text = "kein 90/10 Trigger"
+    elif micro_age == 0:
+        micro_age_text = (
+            "diese Woche · FRESH"
+            if micro_fresh
+            else "diese Woche"
+        )
+    else:
+        micro_age_text = (
+            f"vor {micro_age}W · FRESH"
+            if micro_fresh
+            else f"vor {micro_age}W · nicht frisch"
+        )
+
+    season_overall = str(
+        market_trader_seasonality.get("overall", "N/V") or "N/V"
+    ).upper()
+    if "UNTERSTÜTZT" in season_overall:
+        season_label = "✓ UNTERSTÜTZT"
+    elif "GEGENLÄUFIG" in season_overall:
+        season_label = "⚠ GEGENLÄUFIG"
+    else:
+        season_label = "—"
+
+    season_detail = _regime_ui_safe(
+        market_trader_seasonality.get("compact", "— N/V")
+    )
 
     st.html(
         f"""
         <style>
-        .ri-wrap{{margin:10px 0 16px}}
-        .ri-title{{font-size:10px;font-weight:800;letter-spacing:.07em;color:#667085;text-transform:uppercase;margin-bottom:8px}}
-        .ri-grid{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}}
-        .ri-card{{background:#fff;border:1px solid #e3e8ef;border-radius:11px;padding:13px 14px;min-height:78px}}
-        .ri-label{{font-size:9px;color:#667085;font-weight:760;letter-spacing:.055em;text-transform:uppercase}}
-        .ri-value{{font-size:17px;color:#101828;font-weight:760;margin-top:5px;line-height:1.2}}
-        .ri-sub{{font-size:9px;color:#98a2b3;margin-top:5px;line-height:1.35}}
-        .ri-note{{font-size:9px;color:#667085;margin-top:8px;line-height:1.45}}
-        @media(max-width:800px){{.ri-grid{{grid-template-columns:repeat(2,minmax(0,1fr))}}}}
+        .ct-wrap{{margin:12px 0 18px}}
+        .ct-title{{font-size:10px;font-weight:820;letter-spacing:.075em;color:#667085;text-transform:uppercase;margin-bottom:8px}}
+        .ct-grid{{display:grid;grid-template-columns:1fr 1fr .8fr 1fr 1.35fr;gap:9px}}
+        .ct-card{{background:#fff;border:1px solid #e3e8ef;border-radius:11px;padding:13px 14px;min-height:83px}}
+        .ct-label{{font-size:9px;color:#667085;font-weight:780;letter-spacing:.055em;text-transform:uppercase}}
+        .ct-value{{font-size:16px;color:#101828;font-weight:790;margin-top:5px;line-height:1.18}}
+        .ct-sub{{font-size:9px;color:#98a2b3;margin-top:5px;line-height:1.35}}
+        @media(max-width:1050px){{.ct-grid{{grid-template-columns:repeat(2,minmax(0,1fr))}}}}
         </style>
-        <div class="ri-wrap">
-          <div class="ri-title">RESEARCH-INFORMED FX OVERLAY · V3.13A</div>
-          <div class="ri-grid">
-            <div class="ri-card"><div class="ri-label">BIAS</div><div class="ri-value">{bias}</div><div class="ri-sub">TFF Dealer Net/OI 156W · {pct_txt}</div></div>
-            <div class="ri-card"><div class="ri-label">CONFIDENCE</div><div class="ri-value">{confidence}</div><div class="ri-sub">Raw Release Flow · {flow}</div></div>
-            <div class="ri-card"><div class="ri-label">TIMING</div><div class="ri-value">{timing}</div><div class="ri-sub">orientiert 1W {v1_txt} · 2W {v2_txt}</div></div>
-            <div class="ri-card"><div class="ri-label">ACTION</div><div class="ri-value">{action}</div><div class="ri-sub">S&amp;D / Entry / SL / TP separat</div></div>
+        <div class="ct-wrap">
+          <div class="ct-title">Aktueller Trade-Kontext · V3.14.5 Logik</div>
+          <div class="ct-grid">
+            <div class="ct-card">
+              <div class="ct-label">Makro · 156W</div>
+              <div class="ct-value">{macro_label}</div>
+              <div class="ct-sub">{_regime_ui_safe(macro_age_text)}</div>
+            </div>
+            <div class="ct-card">
+              <div class="ct-label">Mikro · 26W 90/10</div>
+              <div class="ct-value">{micro_label}</div>
+              <div class="ct-sub">{_regime_ui_safe(micro_age_text)}</div>
+            </div>
+            <div class="ct-card">
+              <div class="ct-label">Bias</div>
+              <div class="ct-value">{bias}</div>
+              <div class="ct-sub">Signal · {signal_label}</div>
+            </div>
+            <div class="ct-card">
+              <div class="ct-label">Seasonality</div>
+              <div class="ct-value">{_regime_ui_safe(season_label)}</div>
+              <div class="ct-sub">{season_detail}</div>
+            </div>
+            <div class="ct-card">
+              <div class="ct-label">Plan</div>
+              <div class="ct-value">{plan}</div>
+              <div class="ct-sub">S&amp;D · Entry · SL · TP · Risiko bleiben separat</div>
+            </div>
           </div>
-          <div class="ri-note">Research Freeze: 156W · soft 75/25 · Raw Velocity 1–2W · 8W Forward · Status HOLD. 75/25 ist nur Early-Watch; die bestehende 80/20-Regime-/Release-Logik und das FTMO-Risiko bleiben unverändert. Timing „DEVELOPED/LATE“ ist bewusst eine operative Heuristik, kein empirisch eingefrorener Maturity-Parameter.</div>
         </div>
         """
     )
+
+    st.caption(
+        "Priorität: Vor dem 156W-Release führt nur ein frischer 26W-90/10-Trigger "
+        "die Handelsrichtung. Ab RELEASE/CONFIRMED führt Makro; Mikro dient dann "
+        "als Timing. Seasonality ist Confluence only."
+    )
+
 
 
 def _render_regime_trader_overview() -> None:
@@ -1218,37 +1347,217 @@ with tab1:
             f"Extremdauer {cycle.get('extreme_duration', 0)}W",
         )
 
-    with st.expander("Advanced · 26W COT-Index anzeigen", expanded=False):
-        st.caption(
-            "Der 26W-COT-Index bleibt vollständig verfügbar, beeinflusst aber die primäre "
-            "V3.10.0 State/Release-Logik nicht mehr."
+    st.markdown("### Mikro-Timing · 26W COT-Index")
+    definition(
+        "Der 26W-Commercial-COT-Index ist die kurzfristige Timing-Ebene. "
+        "BULLISH TRIGGER = Eintritt von <90 auf ≥90; "
+        "BEARISH TRIGGER = Eintritt von >10 auf ≤10. "
+        "Das Ereignis bleibt mit Alter sichtbar, auch wenn der Index die Zone "
+        "wieder verlässt. Nur 0–2 COT-Wochen gelten als Fresh. "
+        "Non-Commercial und Retail werden im Chart ausschließlich als "
+        "Research-Vergleich gezeigt und erzeugen keinen Mikro-Trigger."
+    )
+
+    _micro_values = pd.to_numeric(
+        cot["commercial_index"],
+        errors="coerce",
+    )
+    _micro_prev = _micro_values.shift(1)
+    _micro_bull_entries = (
+        (_micro_prev < 90.0)
+        & (_micro_values >= 90.0)
+    )
+    _micro_bear_entries = (
+        (_micro_prev > 10.0)
+        & (_micro_values <= 10.0)
+    )
+
+    fig_idx = go.Figure()
+    fig_idx.add_trace(
+        go.Scatter(
+            x=cot["report_date"],
+            y=_micro_values,
+            mode="lines",
+            name="Commercial COT-Index · 26W",
+            line=dict(width=2.2),
         )
-        fig_idx = go.Figure()
-        fig_idx.add_trace(go.Scatter(
-            x=cot["report_date"], y=cot["commercial_index"], mode="lines",
-            name="Commercial COT-Index · 26W", line=dict(width=2),
-        ))
-        fig_idx.add_trace(go.Scatter(
-            x=cot["report_date"], y=cot["noncommercial_index"], mode="lines",
-            name="Non-Commercial COT-Index", line=dict(width=1.5, dash="dash"),
-        ))
-        fig_idx.add_trace(go.Scatter(
-            x=cot["report_date"], y=cot["retail_index"], mode="lines",
-            name="Retail COT-Index · 26W", line=dict(width=1.3, dash="dot"),
-        ))
-        fig_idx.add_hline(y=upper, line_dash="dash", opacity=.35)
-        fig_idx.add_hline(y=lower, line_dash="dash", opacity=.35)
-        fig_idx.update_layout(
-            height=360, margin=dict(l=0, r=0, t=25, b=0),
-            yaxis=dict(range=[0, 100], title="26W COT-Index"), xaxis_title=None,
-            legend=dict(orientation="h", y=1.08),
+    )
+
+    fig_idx.add_trace(
+        go.Scatter(
+            x=cot["report_date"],
+            y=pd.to_numeric(
+                cot["noncommercial_index"],
+                errors="coerce",
+            ),
+            mode="lines",
+            name="Non-Commercial COT-Index",
+            line=dict(
+                width=1.25,
+                dash="dash",
+            ),
+            opacity=.65,
         )
-        tradingview_chart(
-            fig_idx, x_values=cot["report_date"], default_years=3,
-            reset_y_range=(0, 100), date_axis=True,
-            uirevision=f"cot-index-advanced-{market['symbol']}",
+    )
+    fig_idx.add_trace(
+        go.Scatter(
+            x=cot["report_date"],
+            y=pd.to_numeric(
+                cot["retail_index"],
+                errors="coerce",
+            ),
+            mode="lines",
+            name="Retail COT-Index",
+            line=dict(
+                width=1.1,
+                dash="dot",
+            ),
+            opacity=.55,
         )
-        tradingview_plotly_chart(fig_idx, config=plotly_config())
+    )
+
+    if bool(_micro_bull_entries.any()):
+        fig_idx.add_trace(
+            go.Scatter(
+                x=cot.loc[_micro_bull_entries, "report_date"],
+                y=_micro_values.loc[_micro_bull_entries],
+                mode="markers",
+                name="Bullish Trigger · Eintritt ≥90",
+                marker=dict(size=9, symbol="triangle-up"),
+            )
+        )
+
+    if bool(_micro_bear_entries.any()):
+        fig_idx.add_trace(
+            go.Scatter(
+                x=cot.loc[_micro_bear_entries, "report_date"],
+                y=_micro_values.loc[_micro_bear_entries],
+                mode="markers",
+                name="Bearish Trigger · Eintritt ≤10",
+                marker=dict(size=9, symbol="triangle-down"),
+            )
+        )
+
+    fig_idx.add_hline(
+        y=90.0,
+        line_dash="dash",
+        opacity=.45,
+    )
+    fig_idx.add_hline(
+        y=10.0,
+        line_dash="dash",
+        opacity=.45,
+    )
+    fig_idx.update_layout(
+        height=390,
+        margin=dict(l=0, r=0, t=25, b=0),
+        yaxis=dict(
+            range=[0, 100],
+            title="26W Commercial COT-Index",
+        ),
+        legend=dict(
+            orientation="h",
+            y=1.08,
+        ),
+    )
+    tradingview_chart(
+        fig_idx,
+        x_values=cot["report_date"],
+        default_years=3,
+        reset_y_range=(0, 100),
+        date_axis=True,
+        uirevision=f"micro-26w-trigger-{market['symbol']}",
+    )
+    tradingview_plotly_chart(
+        fig_idx,
+        config=plotly_config(),
+    )
+
+    _micro_current = market_micro_trigger.get(
+        "current_value",
+        np.nan,
+    )
+    _micro_trigger_direction = int(
+        market_micro_trigger.get("direction", 0) or 0
+    )
+    _micro_trigger_age = int(
+        market_micro_trigger.get("age_weeks", -1)
+    )
+    _micro_trigger_fresh = bool(
+        market_micro_trigger.get("fresh", False)
+    )
+
+    _m1, _m2, _m3 = st.columns(
+        3,
+        gap="small",
+    )
+    with _m1:
+        metric_card(
+            "AKTUELLER 26W INDEX",
+            (
+                "—"
+                if pd.isna(_micro_current)
+                else f"{float(_micro_current):.1f}"
+            ),
+            "90 / 10 · aktueller Wert",
+        )
+
+    with _m2:
+        _trigger_name = (
+            "BULLISH TRIGGER"
+            if _micro_trigger_direction > 0
+            else "BEARISH TRIGGER"
+            if _micro_trigger_direction < 0
+            else "—"
+        )
+        _trigger_age_text = (
+            "kein historischer 90/10-Eintritt"
+            if _micro_trigger_age < 0
+            else "diese Woche"
+            if _micro_trigger_age == 0
+            else f"vor {_micro_trigger_age}W"
+        )
+        metric_card(
+            "LETZTER MIKRO-TRIGGER",
+            _trigger_name,
+            _trigger_age_text
+            + (
+                " · FRESH"
+                if _micro_trigger_fresh
+                else ""
+            ),
+        )
+
+    with _m3:
+        _decision_micro = dict(
+            market_trader_decision.get("micro") or {}
+        )
+        _trade_direction = int(
+            _decision_micro.get("trade_direction", 0) or 0
+        )
+        _macro_active = bool(
+            dict(
+                market_trader_decision.get("macro") or {}
+            ).get("active", False)
+        )
+
+        metric_card(
+            "TRADER-ROLLE",
+            (
+                "AKTIVER IMPULS"
+                if _trade_direction != 0
+                else "TIMING / HISTORIE"
+                if _micro_trigger_direction != 0
+                else "KEIN TRIGGER"
+            ),
+            (
+                "vor Release richtungsführend"
+                if _trade_direction != 0 and not _macro_active
+                else "ab Release nur Timing"
+                if _macro_active
+                else "kein frischer 0–2W Trigger"
+            ),
+        )
 
     crowd_a, crowd_b, crowd_c = st.columns([1.0, 1.0, 1.15], gap="small")
     with crowd_a:
@@ -1555,6 +1864,7 @@ with tab3:
 
 with tab4:
     section_line("Stufe 5 · Spekulativer Flow", f"{spec_source}")
+    st.caption("Rolle: Spec-Flow ist Cross-Group-Bestätigung/Konflikt; er erzeugt niemals allein die Handelsrichtung.")
     definition(
         "Flow beschreibt, wie sich die spekulative Netto-Position relativ zum Open Interest verändert. "
         "Eine Divergenz liegt erst vor, wenn ein ungewöhnlicher 4W-Preisimpuls und ein ungewöhnlicher "
@@ -2149,7 +2459,89 @@ with tab6:
                 hide_index=True,
             )
 
-        st.markdown("#### Ursprüngliche Index-Extrem-Auswertung")
+        st.markdown(
+            "#### Aktuelle Mikro-Logik · historische 90/10-Trigger"
+        )
+        st.caption(
+            "Ereignis-Audit der heutigen Mikrodefinition. Diese Tabelle "
+            "ist noch keine optimierte Erfolgsstatistik; sie zeigt nur "
+            "die tatsächlichen Eintritte in die 90/10-Zonen."
+        )
+
+        _micro_history = cot[
+            ["report_date", "commercial_index"]
+        ].copy()
+        _micro_history["Vorwoche"] = pd.to_numeric(
+            _micro_history["commercial_index"],
+            errors="coerce",
+        ).shift(1)
+
+        _micro_history["Trigger"] = np.where(
+            (
+                (_micro_history["Vorwoche"] < 90.0)
+                & (_micro_history["commercial_index"] >= 90.0)
+            ),
+            "BULLISH TRIGGER",
+            np.where(
+                (
+                    (_micro_history["Vorwoche"] > 10.0)
+                    & (_micro_history["commercial_index"] <= 10.0)
+                ),
+                "BEARISH TRIGGER",
+                "",
+            ),
+        )
+
+        _micro_history = _micro_history[
+            _micro_history["Trigger"] != ""
+        ].copy()
+
+        if _micro_history.empty:
+            st.info(
+                "Keine historischen 90/10-Eintrittstrigger "
+                "in der verfügbaren Reihe."
+            )
+        else:
+            _micro_history = (
+                _micro_history
+                .tail(20)
+                .sort_values(
+                    "report_date",
+                    ascending=False,
+                )
+                .rename(
+                    columns={
+                        "report_date": "Positionsdatum",
+                        "commercial_index": "26W COT-Index",
+                    }
+                )
+            )
+
+            st.dataframe(
+                _micro_history[
+                    [
+                        "Positionsdatum",
+                        "Trigger",
+                        "26W COT-Index",
+                    ]
+                ].style.format(
+                    {
+                        "26W COT-Index": "{:.1f}",
+                    },
+                    na_rep="—",
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        st.markdown(
+            "#### Legacy · ursprüngliche 80/20-Index-Auswertung"
+        )
+        st.caption(
+            "Historischer Vergleich aus der früheren Strategieversion. "
+            "Diese 80/20-Auswertung steuert den heutigen Mikro-Bias "
+            "nicht mehr; aktuell gilt der eventbasierte 90/10-Entry-Trigger."
+        )
         events = build_events(
             cot=cot,
             prices=prices,

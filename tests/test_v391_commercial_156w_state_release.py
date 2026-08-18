@@ -79,7 +79,7 @@ def test_ui_keeps_156w_primary_and_26w_advanced():
     watch = (ROOT / "pages/watchlist.py").read_text(encoding="utf-8")
     fx = (ROOT / "pages/forex_matrix.py").read_text(encoding="utf-8")
     assert "Commercial Positioning · 156W" in market
-    assert "Advanced · 26W COT-Index anzeigen" in market
+    assert "Mikro-Timing · 26W COT-Index" in market
     assert "Commercial Net Percentile 156W ist die Ausgangslage" in watch
     assert "156W RELEASE CONTEXT" in fx
 

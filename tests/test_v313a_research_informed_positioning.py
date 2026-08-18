@@ -85,8 +85,8 @@ def test_confirmed_regime_can_surface_setup_search_not_trade_execution():
 def test_ui_contains_bias_confidence_timing_action_and_early_fx_watch():
     market = (ROOT / "pages/marktanalyse.py").read_text(encoding="utf-8")
     watch = (ROOT / "pages/watchlist.py").read_text(encoding="utf-8")
-    assert "RESEARCH-INFORMED FX OVERLAY" in market
-    for label in ("BIAS", "CONFIDENCE", "TIMING", "ACTION"):
+    assert "Aktueller Trade-Kontext · V3.14.5 Logik" in market
+    for label in ("Makro · 156W", "Mikro · 26W 90/10", "Bias", "Plan"):
         assert label in market
     assert "Early FX Watch" in watch
     assert "75/25" in watch
