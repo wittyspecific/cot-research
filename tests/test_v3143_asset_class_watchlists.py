@@ -24,12 +24,12 @@ def test_v3143_navigation_metadata_exists():
         assert label in text
 
 
-def test_v3143_app_places_asset_pages_after_watchlist():
+def test_v3143_asset_pages_are_now_hidden_from_global_sidebar():
     text = APP.read_text(encoding="utf-8")
-    assert "from src.watchlist_asset_nav import WATCHLIST_ASSET_PAGES" in text
     assert 'st.Page("pages/watchlist.py", title="Watchlist"' in text
-    assert 'title=f"↳ {item[\'label\']}"' in text
-    assert "for item in WATCHLIST_ASSET_PAGES" in text
+    assert "from src.watchlist_asset_nav import WATCHLIST_ASSET_PAGES" not in text
+    assert "for item in WATCHLIST_ASSET_PAGES" not in text
+
 
 
 def test_v3143_wrappers_reuse_main_watchlist():

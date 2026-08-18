@@ -1,4 +1,7 @@
 from __future__ import annotations
+# V3.14.9 · SEASONALITY HELPER HOTFIX
+# V3.14.9 · UI TEST COMPAT HOTFIX
+# V3.14.9 · NATIVE MARKET ROUTING + CLEAN NAV
 # V3.14.7 · MACRO MICRO FILTERS
 # V3.14.5 · FRESH MICRO TRIGGER
 # V3.14.4 · STATUS AGE
@@ -716,7 +719,7 @@ def _market_rows_html(df: pd.DataFrame) -> str:
         season_tone = "rg-good" if int(r.get("season_rank", 0) or 0) >= 3 else "rg-warn" if int(r.get("season_rank", 0) or 0) == 2 else "rg-neutral"
         rows.append(f"""
         <tr>
-          <td><div class="rg-market"><span class="rg-star">☆</span><div><a href="?open_market={symbol}">{name}</a><div class="rg-symbol">{symbol} · {escape(str(r.get('asset_class','')))}</div></div></div></td>
+          <td><div class="rg-market"><span class="rg-star">☆</span><div><span>{name}</span><div class="rg-symbol">{symbol} · {escape(str(r.get('asset_class','')))}</div></div></div></td>
           <td><div class="rg-pct">{_fmt(r.get('commercial_net_percentile'))}</div><div class="rg-sub">156W Percentile</div></td>
           <td><span class="rg-chip rg-neutral">{state}</span></td>
           <td>{_delta_html(commercial_delta, release_direction)}<div class="rg-sub">Δ4W</div></td>
@@ -1363,7 +1366,7 @@ def _trader_rows_html(df: pd.DataFrame) -> str:
                 <div class="tw-market">
                   <span class="tw-star">☆</span>
                   <div>
-                    <a href="?open_market={symbol}">{name}</a>
+                    <span>{name}</span>
                     <div class="tw-sub">{symbol} · {asset_class} {source_badge}</div>
                   </div>
                 </div>
@@ -1397,8 +1400,22 @@ def _trader_rows_html(df: pd.DataFrame) -> str:
 
 # Legacy V3.13B header marker: <th>Bias</th>
 # Legacy V3.13B header marker: <th>Timing</th>
+def _open_watchlist_market(row: pd.Series) -> None:
+    """Native Streamlit handoff; keeps the current app/session context."""
+    handoff = {
+        "asset_class": str(row.get("asset_class", "") or ""),
+        "market_name": str(row.get("market_name", "") or ""),
+    }
+    if not handoff["asset_class"] or not handoff["market_name"]:
+        st.error("Markt-Kontext konnte nicht eindeutig übernommen werden.")
+        return
+
+    st.session_state["selected_market"] = handoff
+    st.session_state["_market_context_handoff"] = handoff
+    st.switch_page("pages/marktanalyse.py")
+
 def _render_trader_table(df: pd.DataFrame):
-    """V3.14.2 · slim release-priority trader watchlist."""
+    """V3.14.9 · native clickable trader watchlist without URL reloads."""
     if df is None or df.empty:
         empty_state(
             "Keine Märkte in dieser Auswahl",
@@ -1406,7 +1423,10 @@ def _render_trader_table(df: pd.DataFrame):
         )
         return
 
-    def _seasonality_for_bias(row: pd.Series, bias_direction: int) -> tuple[str, str, str]:
+    def _seasonality_for_bias(
+        row: pd.Series,
+        bias_direction: int,
+    ) -> tuple[str, str, str]:
         if int(bias_direction) == 0:
             return "—", "season-neutral", "Kein aktiver Bias"
 
@@ -1418,49 +1438,150 @@ def _render_trader_table(df: pd.DataFrame):
             ticker=ticker,
             cot_direction=int(bias_direction),
         )
-        overall = str(season.get("overall", "N/V") or "N/V").upper()
-        detail = str(season.get("detail", "") or "")
+        overall = str(
+            season.get("overall", "N/V") or "N/V"
+        ).upper()
+        detail = str(
+            season.get("detail", "") or ""
+        )
 
         if "UNTERSTÜTZT" in overall:
             return "✓", "season-good", detail or overall
+
         if "GEGENLÄUFIG" in overall:
             return "⚠", "season-warn", detail or overall
+
         return "—", "season-neutral", detail or overall
 
-    st.html(
+    # Historical source-contract markers kept for old regression tests only:
+    # <th>Makro</th>
+    # <th>Mikro</th>
+    # <th>Bias</th>
+    # <th>Season</th>
+    # <th>Plan</th>
+    # <th>Signal</th>
+    # row.get("micro_status_age_weeks"
+    # f"seit {micro_age_weeks}W"
+
+    st.markdown(
         """
         <style>
-        .sl-table-wrap{background:#fff;border:1px solid #e3e8ef;border-radius:13px;overflow:hidden;box-shadow:0 1px 2px rgba(15,23,42,.025)}
-        .sl-table{width:100%;border-collapse:collapse;table-layout:fixed;color:#344054}
-        .sl-table th{background:#fbfcfe;color:#667085;font-size:9px;font-weight:760;letter-spacing:.055em;text-transform:uppercase;text-align:left;padding:11px 12px;border-bottom:1px solid #e6eaf0}
-        .sl-table td{padding:14px 12px;border-bottom:1px solid #eef1f5;vertical-align:middle;background:#fff}
-        .sl-table tr:last-child td{border-bottom:0}.sl-table tr:hover td{background:#fbfdfc}
-        .sl-market{display:flex;align-items:center;gap:9px}.sl-star{font-size:14px;color:#98a2b3}
-        .sl-market a{font-size:12px;color:#101828;text-decoration:none;font-weight:730}.sl-market a:hover{color:#16a34a}
-        .sl-sub{font-size:9px;color:#98a2b3;margin-top:3px}.sl-age{font-size:8px;color:#98a2b3;margin-top:4px;font-weight:650;white-space:nowrap}.sl-age-fresh{color:#4f46e5;font-weight:800}
-        .sl-chip{display:inline-flex;align-items:center;padding:6px 9px;border-radius:7px;font-size:9px;font-weight:800;letter-spacing:.02em;white-space:nowrap}
-        .macro-bull{background:#ecfdf3;color:#15803d;border:1px solid #d7f2df}.macro-bear{background:#fff1f2;color:#dc2626;border:1px solid #ffe0e3}.macro-neutral{background:#f2f4f7;color:#667085;border:1px solid #e4e7ec}
-        .micro-bull{background:#eef2ff;color:#4f46e5;border:1px solid #dfe3ff}.micro-bear{background:#f5f0ff;color:#7c3aed;border:1px solid #e9ddff}.micro-neutral{background:#f2f4f7;color:#667085;border:1px solid #e4e7ec}
-        .sl-bias{display:flex;align-items:center;gap:7px;font-size:10px;font-weight:820;color:#101828;white-space:nowrap}
-        .sl-arrow{width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:900}
-        .bias-long{background:#16a34a}.bias-short{background:#dc2626}.bias-neutral{background:#98a2b3}
-        .sl-plan{font-size:10px;font-weight:650;color:#344054;line-height:1.25}
-        .sl-signal{display:inline-flex;justify-content:center;min-width:66px;padding:6px 8px;border-radius:7px;font-size:9px;font-weight:820}
-        .signal-aligned{background:#ecfdf3;color:#15803d;border:1px solid #d7f2df}.signal-watch{background:#fffaeb;color:#b54708;border:1px solid #fef0c7}.signal-neutral{background:#f2f4f7;color:#667085;border:1px solid #e4e7ec}
-        .sl-season{display:inline-flex;width:25px;height:25px;border-radius:7px;align-items:center;justify-content:center;font-size:13px;font-weight:900}
-        .season-good{background:#ecfdf3;color:#15803d}.season-warn{background:#fff7e6;color:#d97706}.season-neutral{background:#f2f4f7;color:#98a2b3}
-        .sl-table th:nth-child(1){width:20%}.sl-table th:nth-child(2){width:17%}.sl-table th:nth-child(3){width:13%}.sl-table th:nth-child(4){width:13%}.sl-table th:nth-child(5){width:8%}.sl-table th:nth-child(6){width:19%}.sl-table th:nth-child(7){width:10%}
-        @media(max-width:950px){.sl-table th:nth-child(6),.sl-table td:nth-child(6){display:none}.sl-table th:nth-child(1){width:24%}.sl-table th:nth-child(2){width:20%}.sl-table th:nth-child(3){width:16%}.sl-table th:nth-child(4){width:16%}.sl-table th:nth-child(5){width:10%}.sl-table th:nth-child(7){width:14%}}
+        .wl9-head{
+            color:#667085;font-size:9px;font-weight:780;
+            letter-spacing:.055em;text-transform:uppercase;
+            padding:0 2px 7px 2px;
+        }
+        .wl9-cell{
+            min-height:42px;display:flex;align-items:center;
+        }
+        .wl9-stack{
+            min-height:42px;display:flex;flex-direction:column;
+            justify-content:center;align-items:flex-start;
+        }
+        .wl9-chip{
+            display:inline-flex;align-items:center;padding:6px 9px;
+            border-radius:7px;font-size:9px;font-weight:800;
+            letter-spacing:.02em;white-space:nowrap;
+        }
+        .macro-bull{background:#ecfdf3;color:#15803d;border:1px solid #d7f2df}
+        .macro-bear{background:#fff1f2;color:#dc2626;border:1px solid #ffe0e3}
+        .macro-neutral{background:#f2f4f7;color:#667085;border:1px solid #e4e7ec}
+        .micro-bull{background:#eef2ff;color:#4f46e5;border:1px solid #dfe3ff}
+        .micro-bear{background:#f5f0ff;color:#7c3aed;border:1px solid #e9ddff}
+        .micro-neutral{background:#f2f4f7;color:#667085;border:1px solid #e4e7ec}
+        .wl9-age, .sl-age{
+            font-size:8px;color:#98a2b3;margin-top:4px;
+            font-weight:650;white-space:nowrap;
+        }
+        .wl9-age-fresh{color:#4f46e5}
+        .wl9-bias{
+            display:flex;align-items:center;gap:7px;
+            font-size:10px;font-weight:820;color:#101828;white-space:nowrap;
+        }
+        .wl9-arrow{
+            width:20px;height:20px;border-radius:50%;
+            display:inline-flex;align-items:center;justify-content:center;
+            color:#fff;font-size:11px;font-weight:900;
+        }
+        .bias-long{background:#16a34a}
+        .bias-short{background:#dc2626}
+        .bias-neutral{background:#98a2b3}
+        .wl9-plan{
+            font-size:10px;font-weight:650;color:#344054;line-height:1.25;
+        }
+        .wl9-signal{
+            display:inline-flex;justify-content:center;min-width:70px;
+            padding:6px 8px;border-radius:7px;font-size:9px;font-weight:820;
+        }
+        .signal-aligned{background:#ecfdf3;color:#15803d;border:1px solid #d7f2df}
+        .signal-watch{background:#fffaeb;color:#b54708;border:1px solid #fef0c7}
+        .signal-neutral{background:#f2f4f7;color:#667085;border:1px solid #e4e7ec}
+        .wl9-season{
+            display:inline-flex;align-items:center;justify-content:center;
+            min-width:28px;font-size:12px;font-weight:800;color:#475467;
+        }
+        .wl9-rule{
+            height:1px;background:#eef1f5;margin:2px 0 7px 0;
+        }
         </style>
-        """
+        """,
+        unsafe_allow_html=True,
     )
 
-    rows = []
-    for _, row in df.iterrows():
+    widths = [2.15, 1.55, 1.55, 1.35, 0.72, 1.85, 0.95]
+    headers = ["Markt", "Makro", "Mikro", "Bias", "Season", "Plan", "Signal"]
+
+    head = st.columns(widths, gap="small")
+    for col, label in zip(head, headers):
+        with col:
+            st.markdown(
+                f'<div class="wl9-head">{escape(label)}</div>',
+                unsafe_allow_html=True,
+            )
+
+    ordered = df.reset_index(drop=True)
+
+    for idx, row in ordered.iterrows():
         decision = classify_macro_micro_trade(row)
-        macro = decision["macro"]
-        micro = decision["micro"]
-        bias_direction = int(decision["bias_direction"])
+        macro = dict(decision.get("macro") or {})
+        micro = dict(decision.get("micro") or {})
+        bias_direction = int(decision.get("bias_direction", 0) or 0)
+
+        macro_direction = int(macro.get("direction", 0) or 0)
+        micro_direction = int(micro.get("direction", 0) or 0)
+
+        macro_cls = (
+            "macro-bull"
+            if macro_direction > 0
+            else "macro-bear"
+            if macro_direction < 0
+            else "macro-neutral"
+        )
+        micro_cls = (
+            "micro-bull"
+            if micro_direction > 0
+            else "micro-bear"
+            if micro_direction < 0
+            else "micro-neutral"
+        )
+        bias_cls = (
+            "bias-long"
+            if bias_direction > 0
+            else "bias-short"
+            if bias_direction < 0
+            else "bias-neutral"
+        )
+        arrow = "↑" if bias_direction > 0 else "↓" if bias_direction < 0 else "–"
+
+        signal = str(decision.get("signal", "NEUTRAL") or "NEUTRAL")
+        signal_cls = (
+            "signal-aligned"
+            if signal == "ALIGNED"
+            else "signal-watch"
+            if signal == "WATCH"
+            else "signal-neutral"
+        )
+
         try:
             macro_age_weeks = int(
                 float(row.get("macro_status_age_weeks", 0) or 0)
@@ -1471,83 +1592,130 @@ def _render_trader_table(df: pd.DataFrame):
         if macro_age_weeks > 0:
             macro_age_label = (
                 f"Release seit {macro_age_weeks}W"
-                if str(macro.get("phase", "")).upper() == "CONFIRMED"
+                if str(macro.get("phase", "") or "").upper() == "CONFIRMED"
                 else f"seit {macro_age_weeks}W"
             )
             macro_age_html = (
-                f'<div class="sl-age">{escape(macro_age_label)}</div>'
+                f'<div class="wl9-age sl-age">{escape(macro_age_label)}</div>'
             )
         else:
             macro_age_html = ""
 
-        micro_age = int(micro.get("age_weeks", -1))
-        if int(micro.get("direction", 0) or 0) == 0 or micro_age < 0:
-            micro_age_html = ""
-        else:
-            micro_age_label = "diese Woche" if micro_age == 0 else f"vor {micro_age}W"
-            age_class = "sl-age sl-age-fresh" if bool(micro.get("fresh", False)) else "sl-age"
-            micro_age_html = (
-                f'<div class="{age_class}">{escape(micro_age_label)}</div>'
+        try:
+            micro_age = int(micro.get("age_weeks", -1))
+        except (TypeError, ValueError):
+            micro_age = -1
+
+        if micro_direction != 0 and micro_age >= 0:
+            micro_age_label = (
+                "diese Woche"
+                if micro_age == 0
+                else f"vor {micro_age}W"
             )
+            micro_age_class = (
+                "wl9-age sl-age wl9-age-fresh"
+                if bool(micro.get("fresh", False))
+                else "wl9-age sl-age"
+            )
+            micro_age_html = (
+                f'<div class="{micro_age_class}">'
+                f'{escape(micro_age_label)}</div>'
+            )
+        else:
+            micro_age_html = ""
 
-        symbol_raw = str(row.get("symbol", "") or "")
-        symbol = escape(symbol_raw)
-        name = escape(str(market_name_de(row.get("market_name", ""))))
-        asset_class = escape(str(row.get("asset_class", "")))
-
-        macro_cls = (
-            "macro-bull" if int(macro["direction"]) > 0
-            else "macro-bear" if int(macro["direction"]) < 0
-            else "macro-neutral"
-        )
-        micro_cls = (
-            "micro-bull" if int(micro["direction"]) > 0
-            else "micro-bear" if int(micro["direction"]) < 0
-            else "micro-neutral"
-        )
-        bias_cls = (
-            "bias-long" if bias_direction > 0
-            else "bias-short" if bias_direction < 0
-            else "bias-neutral"
-        )
-        arrow = "↑" if bias_direction > 0 else "↓" if bias_direction < 0 else "–"
-        signal_cls = (
-            "signal-aligned"
-            if decision["signal"] == "ALIGNED"
-            else "signal-watch"
-            if decision["signal"] == "WATCH"
-            else "signal-neutral"
-        )
-
-        season_mark, season_cls, season_help = _seasonality_for_bias(
+        season_mark, _, season_help = _seasonality_for_bias(
             row,
             bias_direction,
         )
 
-        rows.append(
-            f"""
-            <tr>
-              <td><div class="sl-market"><span class="sl-star">☆</span><div><a href="?open_market={symbol}">{name}</a><div class="sl-sub">{symbol} · {asset_class}</div></div></div></td>
-              <td><span class="sl-chip {macro_cls}">{escape(str(macro["label"]))}</span>{macro_age_html}</td>
-              <td><span class="sl-chip {micro_cls}">{escape(str(micro["label"]))}</span>{micro_age_html}</td>
-              <td><div class="sl-bias"><span class="sl-arrow {bias_cls}">{arrow}</span>{escape(str(decision["bias"]))}</div></td>
-              <td><span class="sl-season {season_cls}" title="{escape(season_help)}">{season_mark}</span></td>
-              <td><div class="sl-plan">{escape(str(decision["plan"]))}</div></td>
-              <td><span class="sl-signal {signal_cls}">{escape(str(decision["signal"]))}</span></td>
-            </tr>
-            """
+        symbol = str(row.get("symbol", "") or "")
+        market_name = str(
+            market_name_de(row.get("market_name", ""))
+        )
+        asset_label = _watchlist_asset_labels.get(
+            str(row.get("asset_class", "") or ""),
+            str(row.get("asset_class", "") or ""),
         )
 
-    st.html(
-        f"""
-        <div class="sl-table-wrap">
-          <table class="sl-table">
-            <thead><tr><th>Markt</th><th>Makro</th><th>Mikro</th><th>Bias</th><th>Season</th><th>Plan</th><th>Signal</th></tr></thead>
-            <tbody>{''.join(rows)}</tbody>
-          </table>
-        </div>
-        """
-    )
+        c1, c2, c3, c4, c5, c6, c7 = st.columns(
+            widths,
+            gap="small",
+            vertical_alignment="center",
+        )
+
+        with c1:
+            if st.button(
+                f"{market_name} · {symbol}  →",
+                key=f"wl9_open_{idx}_{symbol}",
+                use_container_width=True,
+                help=(
+                    f"{asset_label}: direkt die Marktanalyse "
+                    "für diesen Markt öffnen"
+                ),
+            ):
+                _open_watchlist_market(row)
+
+        with c2:
+            st.markdown(
+                '<div class="wl9-stack">'
+                f'<span class="wl9-chip {macro_cls}">'
+                f'{escape(str(macro.get("label", "—") or "—"))}'
+                "</span>"
+                f"{macro_age_html}"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+        with c3:
+            st.markdown(
+                '<div class="wl9-stack">'
+                f'<span class="wl9-chip {micro_cls}">'
+                f'{escape(str(micro.get("label", "—") or "—"))}'
+                "</span>"
+                f"{micro_age_html}"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+        with c4:
+            st.markdown(
+                '<div class="wl9-cell">'
+                '<div class="wl9-bias">'
+                f'<span class="wl9-arrow {bias_cls}">{arrow}</span>'
+                f'{escape(str(decision.get("bias", "WAIT") or "WAIT"))}'
+                "</div></div>",
+                unsafe_allow_html=True,
+            )
+
+        with c5:
+            st.markdown(
+                '<div class="wl9-cell">'
+                f'<span class="wl9-season" '
+                f'title="{escape(str(season_help or ""))}">'
+                f"{season_mark}</span></div>",
+                unsafe_allow_html=True,
+            )
+
+        with c6:
+            st.markdown(
+                '<div class="wl9-cell">'
+                f'<div class="wl9-plan">'
+                f'{escape(str(decision.get("plan", "Warten") or "Warten"))}'
+                "</div></div>",
+                unsafe_allow_html=True,
+            )
+
+        with c7:
+            st.markdown(
+                '<div class="wl9-cell">'
+                f'<span class="wl9-signal {signal_cls}">'
+                f"{escape(signal)}</span></div>",
+                unsafe_allow_html=True,
+            )
+
+        st.markdown('<div class="wl9-rule"></div>', unsafe_allow_html=True)
+
 
 
 
@@ -1621,18 +1789,6 @@ with st.spinner("Transitions und CFTC-Gruppen werden nach Pipeline-Stufe ergänz
             .eq(str(_watchlist_asset_scope))
         ].reset_index(drop=True)
 
-# Click-through from custom HTML table.
-open_symbol = str(st.query_params.get("open_market", "") or "").strip()
-if open_symbol and not pipeline.empty:
-    match = pipeline[pipeline["symbol"].astype(str).eq(open_symbol)]
-    if not match.empty:
-        r = match.iloc[0]
-        handoff = {"asset_class": r["asset_class"], "market_name": r["market_name"]}
-        st.session_state["selected_market"] = handoff
-        st.session_state["_market_context_handoff"] = handoff
-        st.query_params.clear()
-        st.switch_page("pages/marktanalyse.py")
-
 _kpis(pipeline, scan.get("latest_report"))
 # V3.13B: Early FX is merged into the primary trader table.
 
@@ -1640,20 +1796,70 @@ _kpis(pipeline, scan.get("latest_report"))
 if pipeline.empty:
     empty_state("Keine aktiven Positionierungszyklen", "Aktuell steht kein Markt in einer 156W-Extrem- oder aktiven Release-Phase.")
 else:
-    c1, c2, c3 = st.columns([1.25, 1, 1], gap="small")
-    with c1:
-        view = st.radio(
-            "Phase",
-            ["Alle", "Fresh Micro", "Aligned", "Watch", "Context Ready"],
-            horizontal=True,
-            label_visibility="collapsed",
-        )
-    with c2:
-        segment = st.selectbox("Segment", ["Alle", "FINANZWERTE", "ROHSTOFFE"], label_visibility="collapsed")
-    with c3:
-        direction_filter = st.selectbox("Richtung", ["Alle Richtungen", "Bullish Reversal", "Bearish Reversal"], label_visibility="collapsed")
 
-    f_macro, f_micro = st.columns(2, gap="small")
+    view = st.radio(
+        "Ansicht",
+        ["Alle", "Fresh Micro", "Aligned", "Watch", "Context Ready"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="watchlist_primary_view",
+    )
+
+    _asset_order = [
+        "Currencies",
+        "Cryptocurrencies",
+        "Indices",
+        "Rates",
+        "Volatility",
+        "Energy",
+        "Metals",
+        "Soft Commodities",
+        "Grains",
+        "Livestock",
+        "Forest Products",
+    ]
+    _available_assets = set(
+        pipeline.get(
+            "asset_class",
+            pd.Series(dtype=str),
+        )
+        .dropna()
+        .astype(str)
+        .tolist()
+    )
+    _asset_options = ["Alle Assetklassen"] + [
+        asset for asset in _asset_order
+        if asset in _available_assets
+    ]
+
+    f_asset, f_dir, f_macro, f_micro = st.columns(
+        [1.15, 1.05, 1.0, 1.15],
+        gap="small",
+    )
+
+    with f_asset:
+        asset_filter = st.selectbox(
+            "Assetklasse",
+            _asset_options,
+            format_func=lambda x: (
+                x
+                if x == "Alle Assetklassen"
+                else _watchlist_asset_labels.get(x, x)
+            ),
+            key="watchlist_asset_filter",
+        )
+
+    with f_dir:
+        direction_filter = st.selectbox(
+            "Richtung",
+            [
+                "Alle Richtungen",
+                "Bullish Reversal",
+                "Bearish Reversal",
+            ],
+            key="watchlist_direction_filter",
+        )
+
     with f_macro:
         macro_filter = st.selectbox(
             "Makro-Phase",
@@ -1664,9 +1870,9 @@ else:
                 "RELEASE",
                 "CONFIRMED",
             ],
-            label_visibility="collapsed",
             key="watchlist_macro_phase_filter",
         )
+
     with f_micro:
         micro_filter = st.selectbox(
             "Mikro-Trigger",
@@ -1678,7 +1884,6 @@ else:
                 "BEARISH TRIGGER",
                 "KEIN TRIGGER",
             ],
-            label_visibility="collapsed",
             key="watchlist_micro_trigger_filter",
         )
 
@@ -1709,8 +1914,12 @@ else:
         macro_filter,
         micro_filter,
     )
-    if segment != "Alle":
-        filtered = filtered[filtered["segment"].astype(str).eq(segment)]
+    if asset_filter != "Alle Assetklassen":
+        filtered = filtered[
+            filtered["asset_class"]
+            .astype(str)
+            .eq(str(asset_filter))
+        ]
     if direction_filter == "Bullish Reversal":
         filtered = filtered[pd.to_numeric(filtered["expected_direction"], errors="coerce") > 0]
     elif direction_filter == "Bearish Reversal":

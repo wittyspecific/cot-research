@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import streamlit as st
-from src.watchlist_asset_nav import WATCHLIST_ASSET_PAGES
-# V3.14.3 · ASSET CLASS WATCHLIST NAVIGATION
 
 from src.deployment_mode import REMOTE_GATEWAY, deployment_config_from_mapping
 from src.journal_gateway_client import JournalGatewayClient, JournalGatewayError, config_from_mapping as gateway_config_from_mapping
@@ -192,14 +190,6 @@ pages: dict[str, list] = {
     ],
     "RESEARCH": [
         st.Page("pages/watchlist.py", title="Watchlist", icon=":material/radar:"),
-        *[
-            st.Page(
-                item["path"],
-                title=f"↳ {item['label']}",
-                icon=":material/subdirectory_arrow_right:",
-            )
-            for item in WATCHLIST_ASSET_PAGES
-        ],
         st.Page("pages/marktanalyse.py", title="Marktanalyse", icon=":material/query_stats:"),
         st.Page("pages/forex_matrix.py", title="Währungsstärke", icon=":material/currency_exchange:"),
     ],
