@@ -49,7 +49,7 @@ class V3443MarketSeasonalityYAxisTests(unittest.TestCase):
         for p in pages:
             ast.parse(p.read_text(encoding="utf-8"))
         self.assertNotIn("st.plotly_chart(", combined)
-        self.assertEqual(combined.count("tradingview_plotly_chart("), 9)
+        self.assertEqual(combined.count("tradingview_plotly_chart("), 11)
 
 
 if __name__ == "__main__":

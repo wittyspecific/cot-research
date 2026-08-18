@@ -51,6 +51,13 @@ from src.research_lab import (
     index_window_comparison,
     release_decay_study,
 )
+from src.positioning_dynamics_research import (
+    build_positioning_episode_dataset,
+    compare_flow_measures,
+    quantile_effect_study,
+    research_question_coverage,
+    summarize_window_threshold_grid,
+)
 from src.style import (
     apply_style,
     context_strip,
@@ -148,6 +155,26 @@ def number(value, digits=1):
     if value is None or not np.isfinite(value):
         return "—"
     return f"{value:.{digits}f}"
+
+
+@st.cache_data(ttl=6 * 60 * 60, show_spinner=False)
+def _positioning_dynamics_events(
+    enriched_df: pd.DataFrame,
+    prices_df: pd.DataFrame,
+    group_key_value: str,
+    state_basis_value: str,
+    polarity_value: int,
+) -> pd.DataFrame:
+    return build_positioning_episode_dataset(
+        enriched_df,
+        group_key_value,
+        prices=prices_df,
+        state_basis=state_basis_value,
+        windows=(104, 156, 208),
+        thresholds=(70, 75, 80, 85, 90, 95),
+        horizons=(1, 2, 4, 8, 12),
+        polarity=int(polarity_value),
+    )
 
 
 page_header(
@@ -382,14 +409,447 @@ decay = release_decay_study(
 )
 
 
-tab1, tab2, tab3, tab4 = st.tabs(
+# V3.11B: The existing V3.10 release direction is tested as a hypothesis for
+# the primary positioning group. For TFF this does NOT relabel Dealer as a
+# physical hedger; it merely allows the historical price hypothesis to be
+# measured instead of assumed.
+dynamics_primary = (
+    (report_type == "disaggregated" and group_key == "producer")
+    or (report_type == "tff" and group_key == "dealer")
+)
+dynamics_polarity = 1 if dynamics_primary else 0
+
+with st.spinner("Positioning-Dynamics-Episoden werden aufgebaut …"):
+    dynamics_events = _positioning_dynamics_events(
+        enriched,
+        prices,
+        group_key,
+        basis,
+        dynamics_polarity,
+    )
+
+
+tab5, tab1, tab2, tab3, tab4 = st.tabs(
     [
+        "Positioning Dynamics",
         "26W vs. 52W",
         "Release Decay",
         "Nullmodell",
         "Spec-Flow & Divergenz",
     ]
 )
+
+
+with tab5:
+    section_line(
+        "Positioning Dynamics",
+        "V3.11B · State → Flow → Outcome · Research only",
+    )
+    definition(
+        "Dieser Bereich verändert keine Produktionsregel. Er untersucht, ob "
+        "Lookback, Extremtiefe, Episodendauer, Release-Velocity, Acceleration "
+        "und OI-Normalisierung historisch zusätzliche Information über spätere "
+        "Preisbewegungen enthalten."
+    )
+
+    if report_type == "tff" and group_key == "dealer":
+        st.warning(
+            "TFF Dealer/Intermediary werden ausdrücklich nicht als physische Hedger "
+            "bezeichnet. Für diesen Research-Test wird lediglich die bestehende "
+            "V3.10-Hypothese geprüft: Austritt aus oberem Extrem → bullish, "
+            "Austritt aus unterem Extrem → bearish. Das Ergebnis darf diese "
+            "Hypothese bestätigen oder widerlegen."
+        )
+    elif dynamics_polarity == 0:
+        st.info(
+            "Für die gewählte Tradergruppe ist keine Richtungs-Hypothese aktiviert. "
+            "State-/Episodenstatistiken bleiben nutzbar; richtungsbereinigte "
+            "Forward-Returns werden bewusst nicht interpretiert."
+        )
+
+    ctrl1, ctrl2, ctrl3 = st.columns(3)
+    with ctrl1:
+        dyn_horizon = st.radio(
+            "Forward-Horizont",
+            [4, 8, 12],
+            index=1,
+            horizontal=True,
+            format_func=lambda x: f"{x}W",
+            key="v311_dyn_horizon",
+        )
+    with ctrl2:
+        dyn_window = st.selectbox(
+            "Fokus-Lookback",
+            [104, 156, 208],
+            index=1,
+            format_func=lambda x: f"{x} Wochen",
+            key="v311_dyn_window",
+        )
+    with ctrl3:
+        dyn_threshold = st.selectbox(
+            "Fokus-Extrem",
+            [70, 75, 80, 85, 90, 95],
+            index=2,
+            format_func=lambda x: f"{x}/{100-x}",
+            key="v311_dyn_threshold",
+        )
+
+    focus = dynamics_events[
+        (pd.to_numeric(dynamics_events.get("window_weeks"), errors="coerce") == int(dyn_window))
+        & (
+            pd.to_numeric(
+                dynamics_events.get("threshold_upper"),
+                errors="coerce",
+            )
+            == float(dyn_threshold)
+        )
+    ].copy() if not dynamics_events.empty else pd.DataFrame()
+
+    releases = (
+        focus[focus["release_available"].fillna(False)].copy()
+        if not focus.empty and "release_available" in focus.columns
+        else pd.DataFrame()
+    )
+
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        metric_card(
+            "EPISODEN",
+            str(len(focus)),
+            f"{dyn_window}W · {dyn_threshold}/{100-dyn_threshold}",
+        )
+    with k2:
+        metric_card(
+            "RELEASES",
+            str(len(releases)),
+            "erste Woche außerhalb derselben Extremzone",
+        )
+    with k3:
+        metric_card(
+            "MEDIAN DAUER",
+            (
+                "—"
+                if focus.empty
+                else f"{pd.to_numeric(focus['duration_weeks'], errors='coerce').median():.1f}W"
+            ),
+            "zusammenhängende Extrem-Episode",
+        )
+    with k4:
+        metric_card(
+            "MEDIAN EXTREMTIEFE",
+            (
+                "—"
+                if focus.empty
+                else f"{pd.to_numeric(focus['extreme_depth'], errors='coerce').median():.1f} Pkt."
+            ),
+            "Abstand jenseits der gewählten Schwelle",
+        )
+
+    dyn_state, dyn_depth, dyn_flow, dyn_scope = st.tabs(
+        [
+            "Window & Threshold",
+            "Depth & Duration",
+            "Velocity & Acceleration",
+            "Research Scope",
+        ]
+    )
+
+    with dyn_state:
+        st.markdown("### 104W vs. 156W vs. 208W · Threshold Grid")
+        st.caption(
+            "Jede Zeile verwendet unabhängige Extrem-Episoden für genau dieses "
+            "Fenster und diese Schwelle. Strengere Schwellen reduzieren die Fallzahl. "
+            "Ein einzelner bester In-Sample-Wert wird bewusst nicht automatisch gekürt."
+        )
+
+        grid = summarize_window_threshold_grid(
+            dynamics_events,
+            horizon_weeks=int(dyn_horizon),
+        )
+
+        if grid.empty:
+            st.info("Keine ausreichenden Episoden für das Window/Threshold-Grid.")
+        else:
+            grid_display = grid.copy()
+            grid_display = grid_display.rename(
+                columns={
+                    "window_weeks": "Lookback",
+                    "threshold_upper": "Upper",
+                    "threshold_lower": "Lower",
+                    "episodes": "Episoden",
+                    "releases": "Releases",
+                    "median_duration_weeks": "Median Dauer",
+                    "median_extreme_depth": "Median Tiefe",
+                    f"n_{int(dyn_horizon)}w": "n Forward",
+                    f"median_directional_return_{int(dyn_horizon)}w": "Dir. Median",
+                    f"hit_rate_{int(dyn_horizon)}w": "Dir. Hit Rate",
+                    f"median_raw_return_{int(dyn_horizon)}w": "Raw Median",
+                }
+            )
+
+            st.dataframe(
+                grid_display.style.format(
+                    {
+                        "Upper": "{:.0f}",
+                        "Lower": "{:.0f}",
+                        "Median Dauer": "{:.1f}W",
+                        "Median Tiefe": "{:.1f}",
+                        "Dir. Median": "{:+.2%}",
+                        "Dir. Hit Rate": "{:.1%}",
+                        "Raw Median": "{:+.2%}",
+                    },
+                    na_rep="—",
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            if dynamics_polarity:
+                st.caption(
+                    "Dir. Median und Dir. Hit Rate sind nach der getesteten "
+                    "Release-Richtung vorzeichenbereinigt. Entscheidend sind "
+                    "Stabilität über Fenster/Schwellen und ausreichende Episodenzahl, "
+                    "nicht der höchste Einzelwert."
+                )
+
+    with dyn_depth:
+        st.markdown("### Ist ein tieferes oder länger anhaltendes Extrem informativer?")
+        depth_feature = st.radio(
+            "Merkmal",
+            ["extreme_depth", "duration_weeks"],
+            horizontal=True,
+            format_func=lambda x: (
+                "Extreme Depth"
+                if x == "extreme_depth"
+                else "Extreme Duration"
+            ),
+            key="v311_depth_feature",
+        )
+
+        study = quantile_effect_study(
+            releases,
+            depth_feature,
+            horizon_weeks=int(dyn_horizon),
+            quantiles=4,
+        )
+
+        if study.empty:
+            st.info(
+                "Für diese Kombination liegen noch nicht genügend "
+                "richtungsbewertbare Releases für Quartile vor."
+            )
+        else:
+            depth_display = study.rename(
+                columns={
+                    "bucket": "Quartil",
+                    "n": "n",
+                    "feature_median": "Merkmals-Median",
+                    "directional_return_median": "Dir. Median",
+                    "directional_return_mean": "Dir. Mittel",
+                    "hit_rate": "Hit Rate",
+                }
+            )
+            st.dataframe(
+                depth_display[
+                    [
+                        "Quartil",
+                        "n",
+                        "Merkmals-Median",
+                        "Dir. Median",
+                        "Dir. Mittel",
+                        "Hit Rate",
+                    ]
+                ].style.format(
+                    {
+                        "Merkmals-Median": "{:.2f}",
+                        "Dir. Median": "{:+.2%}",
+                        "Dir. Mittel": "{:+.2%}",
+                        "Hit Rate": "{:.1%}",
+                    },
+                    na_rep="—",
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            fig = go.Figure()
+            fig.add_trace(
+                go.Scatter(
+                    x=study["feature_median"],
+                    y=study["directional_return_median"],
+                    mode="lines+markers",
+                    name="Quartile",
+                )
+            )
+            fig.add_hline(y=0, line_dash="dot", opacity=.35)
+            fig.update_layout(
+                height=340,
+                margin=dict(l=0, r=0, t=30, b=0),
+                xaxis_title=(
+                    "Extreme Depth"
+                    if depth_feature == "extreme_depth"
+                    else "Extreme Duration · Wochen"
+                ),
+                yaxis_title=f"Median directional Return · {dyn_horizon}W",
+                title="Monotonie-Check",
+            )
+            tradingview_plotly_chart(fig, config=plotly_config())
+
+        st.caption(
+            "Die Quartile werden nur innerhalb des oben gewählten Lookbacks und "
+            "Thresholds gebildet. Dadurch werden dieselben historischen Episoden "
+            "nicht künstlich mehrfach über verschiedene Sensitivitätsdefinitionen gezählt."
+        )
+
+    with dyn_flow:
+        st.markdown("### Welche Flow-Messung trägt die meiste Information?")
+        flow_lag = st.radio(
+            "Velocity-Horizont",
+            [1, 2, 4],
+            index=1,
+            horizontal=True,
+            format_func=lambda x: f"{x}W",
+            key="v311_flow_lag",
+        )
+
+        flow_study = compare_flow_measures(
+            releases,
+            horizon_weeks=int(dyn_horizon),
+            lag_weeks=int(flow_lag),
+            quantiles=4,
+        )
+
+        if flow_study.empty:
+            st.info(
+                "Für diese Kombination liegen noch nicht genügend "
+                "richtungsbewertbare Releases für den Flow-Vergleich vor."
+            )
+        else:
+            flow_labels = {
+                f"pct_release_velocity_{flow_lag}w": f"Percentile Velocity {flow_lag}W",
+                f"raw_release_velocity_{flow_lag}w": f"Raw Contracts Velocity {flow_lag}W",
+                f"net_oi_release_velocity_{flow_lag}w": f"Net/OI Velocity {flow_lag}W",
+                "pct_release_acceleration": "Percentile Acceleration 1W vs 4W",
+                "raw_release_acceleration": "Raw Acceleration 1W vs 4W",
+                "net_oi_release_acceleration": "Net/OI Acceleration 1W vs 4W",
+            }
+
+            flow_display = flow_study.copy()
+            flow_display["Messung"] = flow_display["feature"].map(flow_labels).fillna(
+                flow_display["feature"]
+            )
+            flow_display = flow_display.rename(
+                columns={
+                    "bucket": "Quartil",
+                    "n": "n",
+                    "feature_median": "Flow-Median",
+                    "directional_return_median": "Dir. Median",
+                    "directional_return_mean": "Dir. Mittel",
+                    "hit_rate": "Hit Rate",
+                }
+            )
+
+            st.dataframe(
+                flow_display[
+                    [
+                        "Messung",
+                        "Quartil",
+                        "n",
+                        "Flow-Median",
+                        "Dir. Median",
+                        "Dir. Mittel",
+                        "Hit Rate",
+                    ]
+                ].style.format(
+                    {
+                        "Flow-Median": "{:+.4f}",
+                        "Dir. Median": "{:+.2%}",
+                        "Dir. Mittel": "{:+.2%}",
+                        "Hit Rate": "{:.1%}",
+                    },
+                    na_rep="—",
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            available_features = list(flow_study["feature"].dropna().unique())
+            chosen_feature = st.selectbox(
+                "Messung visualisieren",
+                available_features,
+                format_func=lambda x: flow_labels.get(x, x),
+                key="v311_flow_feature",
+            )
+            line = flow_study[flow_study["feature"] == chosen_feature].copy()
+
+            if not line.empty:
+                fig = go.Figure()
+                fig.add_trace(
+                    go.Scatter(
+                        x=line["feature_median"],
+                        y=line["directional_return_median"],
+                        mode="lines+markers",
+                        name=flow_labels.get(chosen_feature, chosen_feature),
+                    )
+                )
+                fig.add_hline(y=0, line_dash="dot", opacity=.35)
+                fig.update_layout(
+                    height=340,
+                    margin=dict(l=0, r=0, t=30, b=0),
+                    xaxis_title=flow_labels.get(chosen_feature, chosen_feature),
+                    yaxis_title=f"Median directional Return · {dyn_horizon}W",
+                    title="Flow-Stärke vs. späteres Ergebnis",
+                )
+                tradingview_plotly_chart(fig, config=plotly_config())
+
+        st.markdown(
+            """
+            **Interpretation:** Positive Release-Velocity bedeutet immer Bewegung
+            *aus* dem jeweiligen Extrem. Damit können oberes und unteres Extrem
+            gemeinsam untersucht werden. Percentile, Raw Contracts und Net/OI
+            bleiben getrennte Messfamilien; es wird noch kein Composite Score gebaut.
+            """
+        )
+
+    with dyn_scope:
+        st.markdown("### Welche offenen Fragen beantwortet V3.11 bereits?")
+        coverage = research_question_coverage()
+        st.dataframe(
+            coverage,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        st.markdown(
+            """
+            **Noch nicht in V3.11B enthalten:** exakte Cross-Group-Timestamps,
+            marginaler Mehrwert von Asset Manager / Leveraged Funds sowie
+            ATR-/MFE-basierte Move-Maturity. Diese Punkte benötigen einen zweiten
+            Event-Layer, damit nicht Bestätigung und Timing wieder vermischt werden.
+            """
+        )
+
+        st.download_button(
+            "Episode-Datensatz als CSV exportieren",
+            data=dynamics_events.to_csv(index=False).encode("utf-8"),
+            file_name=(
+                f"positioning_dynamics_{market_name.replace(' ', '_')}_"
+                f"{group_key}_{basis}.csv"
+            ),
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+    st.markdown("#### Methodische Leitplanken")
+    st.markdown(
+        """
+        - Produktionsparameter bleiben unverändert.
+        - Sensitivitätsdefinitionen werden nicht nach dem höchsten In-Sample-Return ausgewählt.
+        - Depth-/Duration-/Flow-Quartile verwenden nur **eine** gewählte Window/Threshold-Kombination.
+        - Für eine Produktionsänderung sind anschließend Zeit-Splits, Market-Cluster-Robustheit
+          und ein gesperrter Out-of-Sample-Test erforderlich.
+        """
+    )
 
 
 with tab1:
