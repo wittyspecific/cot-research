@@ -1,4 +1,33 @@
 from __future__ import annotations
+# V3.14.5 · FRESH MICRO TRIGGER
+# V3.14.4 · STATUS AGE
+
+# V3.14.1 compatibility markers for historical source-based regression tests:
+# Mikro</b>&nbsp;= COT Index 26W · 80/20
+# row.get("micro_status_age_weeks"
+# f"seit {micro_age_weeks}W"
+# row.get("dual_26w_direction"
+# LONG ONLY
+# SHORT ONLY
+# Pullback abwarten
+# Auf Anstieg warten
+# V3.14.2 · MACRO RELEASE PRIORITY
+# Der 26W-COT-Index ist aus dieser Hauptansicht entfernt
+# Commercial Net Percentile 156W ist die Ausgangslage
+# <th>Bias</th>
+# <th>Confidence</th>
+# <th>Timing</th>
+# <th>Action</th>
+# <th>156W Regime</th>
+# <th>26W Timing</th>
+# "Early FX"
+# filtered["research_fx_active"].fillna(False)
+# "Transition Watch"
+# str.contains(
+# "TRANSITION WATCH|REGIME PRESSURE"
+# Commercial 156W
+# COT26 C
+# V3.14.1 · SLIM MACRO MICRO WATCHLIST UI V3
 
 from html import escape
 
@@ -16,6 +45,9 @@ from src.config import (
     NET_VALIDATION_WEEKS,
     RELEASE_ACTIVE_WEEKS,
 )
+from src.research_informed_positioning import load_fx_research_overlay, classify_trader_overlay
+from src.dual_horizon_cot import classify_watchlist_row
+from src.watchlist_macro_micro import classify_macro_micro_trade
 from src.positioning_regime import (
     classify_regime_stage,
     load_cross_group_context,
@@ -286,6 +318,96 @@ def _build_pipeline_rows(all_markets: pd.DataFrame) -> pd.DataFrame:
     ).reset_index(drop=True)
 
 
+def _build_fx_early_research_watch(
+    all_markets: pd.DataFrame,
+    pipeline: pd.DataFrame,
+) -> pd.DataFrame:
+    if all_markets is None or all_markets.empty:
+        return pd.DataFrame()
+
+    stage_lookup = {}
+    if pipeline is not None and not pipeline.empty:
+        for _, pr in pipeline.iterrows():
+            stage_lookup[str(pr.get("symbol", ""))] = {
+                "stage": int(pr.get("regime_stage", 0) or 0),
+                "price_confirming": bool(pr.get("price_confirming", False)),
+            }
+
+    rows = []
+    fx = all_markets[all_markets["asset_class"].astype(str).eq("Currencies")].copy()
+    for _, row in fx.iterrows():
+        research = load_fx_research_overlay(
+            str(row.get("asset_class", "")),
+            str(row.get("cftc_code", "")),
+        )
+        if not bool(research.get("calibrated", False)):
+            continue
+        if not bool(research.get("active", False)):
+            continue
+        if not (
+            bool(research.get("flow_aligned_1w", False))
+            or bool(research.get("flow_aligned_2w", False))
+        ):
+            continue
+
+        symbol = str(row.get("symbol", ""))
+        stage_info = stage_lookup.get(symbol, {"stage": 0, "price_confirming": False})
+        legacy_release = str(row.get("cycle_phase", "")).upper() == "RELEASE"
+        trader = classify_trader_overlay(
+            research,
+            regime_stage=int(stage_info["stage"]),
+            legacy_release=legacy_release,
+            price_confirming=bool(stage_info["price_confirming"]),
+        )
+        rows.append({
+            "Markt": f"{market_name_de(row.get('market_name', ''))} · {symbol}",
+            "Bias": trader.get("bias", "—"),
+            "Confidence": trader.get("confidence", "—"),
+            "Timing": trader.get("timing", "—"),
+            "Action": trader.get("action", "—"),
+            "Dealer Net/OI 156W": research.get("dealer_net_oi_percentile_156w", np.nan),
+            "Release Flow 1W": research.get("release_velocity_1w", np.nan),
+            "Release Flow 2W": research.get("release_velocity_2w", np.nan),
+            "_stage": int(stage_info["stage"]),
+        })
+
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return out
+
+    rank = {"CONFIRMED": 4, "DEVELOPING": 3, "EARLY": 2, "WATCH": 1}
+    out["_confidence_rank"] = out["Confidence"].map(rank).fillna(0)
+    return out.sort_values(
+        ["_confidence_rank", "_stage", "Markt"],
+        ascending=[False, False, True],
+    ).reset_index(drop=True)
+
+
+def _render_fx_early_research_watch(df: pd.DataFrame) -> None:
+    if df is None or df.empty:
+        return
+
+    st.markdown("### Early FX Watch")
+    st.caption(
+        "Research-informed Zusatzansicht: TFF Dealer Net/OI 156W · soft 75/25 · "
+        "Raw Release Velocity 1–2W. Sie ersetzt die bestehende 80/20-Regime-"
+        "Pipeline nicht und verändert kein FTMO-Risiko."
+    )
+    view = df.drop(columns=["_stage", "_confidence_rank"], errors="ignore").copy()
+    st.dataframe(
+        view.style.format(
+            {
+                "Dealer Net/OI 156W": "{:.1f}",
+                "Release Flow 1W": "{:+,.0f}",
+                "Release Flow 2W": "{:+,.0f}",
+            },
+            na_rep="—",
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
 def _pipeline_css():
     st.html("""
     <style>
@@ -315,20 +437,150 @@ def _pipeline_css():
     """)
 
 
-def _kpis(df: pd.DataFrame, report_date):
-    counts = {stage: int((df["regime_stage"] == stage).sum()) for stage in range(1, 6)} if not df.empty else {}
-    cards = [
-        ("COT-Report", de_date(report_date), "letzter verfügbarer Report"),
-        ("Extreme Watch", str(counts.get(1, 0)), "Commercial 156W historisch extrem"),
-        ("In Transition", str(counts.get(2, 0)), "Commercial beginnt sich zu lösen"),
-        ("Cross-Group Shift", str(counts.get(3, 0)), "andere Gruppen reagieren"),
-        ("Regime / Context", str(counts.get(4, 0) + counts.get(5, 0)), f"davon {counts.get(5,0)} mit Preisbestätigung"),
+def _ensure_fresh_micro_rows(
+    all_markets: pd.DataFrame,
+    pipeline: pd.DataFrame,
+) -> pd.DataFrame:
+    """Ensure fresh 90/10 trigger markets reach the trader watchlist."""
+    base = (
+        pipeline.copy()
+        if pipeline is not None and not pipeline.empty
+        else pd.DataFrame()
+    )
+    if all_markets is None or all_markets.empty:
+        return base
+
+    trigger_columns = [
+        "micro_trigger_direction",
+        "micro_trigger_label",
+        "micro_trigger_age_weeks",
+        "micro_trigger_fresh",
+        "micro_trigger_value",
+        "micro_current_index_26w",
+        "micro_trigger_report_date",
     ]
-    html = '<div class="rg-kpi-grid">' + ''.join(
-        f'<div class="rg-kpi"><div class="rg-kpi-label">{escape(a)}</div><div class="rg-kpi-value">{escape(b)}</div><div class="rg-kpi-sub">{escape(c)}</div></div>'
-        for a, b, c in cards
-    ) + '</div>'
-    st.html(html)
+
+    if not base.empty:
+        for col in trigger_columns:
+            if col not in base.columns:
+                base[col] = False if col == "micro_trigger_fresh" else np.nan
+
+    by_symbol = {}
+    if not base.empty and "symbol" in base.columns:
+        by_symbol = {
+            str(row.get("symbol", "")): idx
+            for idx, row in base.iterrows()
+        }
+
+    appended = []
+    for _, source in all_markets.iterrows():
+        symbol = str(source.get("symbol", "") or "")
+        idx = by_symbol.get(symbol)
+
+        if idx is not None:
+            for col in trigger_columns:
+                if col in source.index:
+                    base.at[idx, col] = source.get(col)
+            continue
+
+        if not bool(source.get("micro_trigger_fresh", False)):
+            continue
+
+        raw_context = source.get("context_direction", 0)
+        try:
+            context_value = float(raw_context)
+            context_direction = (
+                int(np.sign(context_value))
+                if np.isfinite(context_value)
+                else 0
+            )
+        except (TypeError, ValueError):
+            context_direction = 0
+
+        new_row = source.to_dict()
+        new_row.update(
+            {
+                "expected_direction": context_direction,
+                "direction_label": (
+                    "BULLISH" if context_direction > 0
+                    else "BEARISH" if context_direction < 0
+                    else "NEUTRAL"
+                ),
+                "segment": (
+                    "FINANZWERTE"
+                    if str(source.get("asset_class", "")) in {"Currencies", "Indices", "Rates"}
+                    else "ROHSTOFFE"
+                ),
+                "regime_stage": 0,
+                "regime_status": "FRESH MICRO",
+                "regime_tone": "neutral",
+                "institutional_aligned": False,
+                "trend_group_aligned": False,
+                "nonreportable_contrarian": False,
+                "price_state": "—",
+                "price_tone": "neutral",
+                "price_confirming": False,
+                "season_overall": "N/V",
+                "season_rank": 0,
+                "research_fx_active": False,
+                "research_direction_conflict": False,
+                "dual_horizon_active": False,
+            }
+        )
+        appended.append(new_row)
+
+    if appended:
+        base = pd.concat([base, pd.DataFrame(appended)], ignore_index=True, sort=False)
+    return base.reset_index(drop=True)
+
+def _kpis(df: pd.DataFrame, report_date):
+    """V3.14.2 · Release-priority macro/micro KPIs."""
+    if df is None:
+        df = pd.DataFrame()
+
+    decisions = [
+        classify_macro_micro_trade(row)
+        for _, row in df.iterrows()
+    ]
+
+    aligned = sum(d["signal"] == "ALIGNED" for d in decisions)
+    watch = sum(d["signal"] == "WATCH" for d in decisions)
+    stage = pd.to_numeric(
+        df.get("regime_stage", pd.Series(dtype=float)),
+        errors="coerce",
+    ).fillna(0)
+    context_ready = int((stage >= 5).sum())
+
+    st.html(
+        f"""
+        <style>
+        .sl-kpis{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:14px 0}}
+        .sl-kpi{{display:flex;align-items:center;gap:13px;padding:16px 18px;min-height:78px;background:#fff;border:1px solid #e3e8ef;border-radius:13px}}
+        .sl-kpi-ico{{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800}}
+        .sl-report{{background:#eef3ff;color:#2563eb}}.sl-aligned{{background:#ecfdf3;color:#16a34a}}.sl-watch{{background:#fff7e6;color:#d97706}}.sl-ready{{background:#f5f0ff;color:#7c3aed}}
+        .sl-kpi-label{{font-size:9px;font-weight:750;color:#667085;text-transform:uppercase;letter-spacing:.04em}}
+        .sl-kpi-value{{font-size:22px;font-weight:780;color:#101828;margin-top:2px}}
+        .sl-logic{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));background:#fff;border:1px solid #e3e8ef;border-radius:11px;padding:11px 14px;margin-bottom:14px}}
+        .sl-logic-item{{display:flex;align-items:center;gap:8px;padding:3px 14px;border-right:1px solid #eef1f5;font-size:10px;color:#667085}}
+        .sl-logic-item:last-child{{border-right:0}}
+        .sl-dot{{width:8px;height:8px;border-radius:50%;display:inline-block;flex:0 0 8px}}.sl-dot-macro{{background:#16a34a}}.sl-dot-micro{{background:#4f46e5}}.sl-dot-bias{{background:#101828}}
+        @media(max-width:900px){{.sl-kpis{{grid-template-columns:repeat(2,minmax(0,1fr))}}.sl-logic{{grid-template-columns:1fr}}.sl-logic-item{{border-right:0;border-bottom:1px solid #eef1f5}}.sl-logic-item:last-child{{border-bottom:0}}}}
+        </style>
+        <div class="sl-kpis">
+          <div class="sl-kpi"><div class="sl-kpi-ico sl-report">◫</div><div><div class="sl-kpi-label">Report</div><div class="sl-kpi-value">{escape(de_date(report_date))}</div></div></div>
+          <div class="sl-kpi"><div class="sl-kpi-ico sl-aligned">✓</div><div><div class="sl-kpi-label">Aligned</div><div class="sl-kpi-value">{aligned}</div></div></div>
+          <div class="sl-kpi"><div class="sl-kpi-ico sl-watch">◉</div><div><div class="sl-kpi-label">Watch</div><div class="sl-kpi-value">{watch}</div></div></div>
+          <div class="sl-kpi"><div class="sl-kpi-ico sl-ready">⌖</div><div><div class="sl-kpi-label">Context Ready</div><div class="sl-kpi-value">{context_ready}</div></div></div>
+        </div>
+        <div class="sl-logic">
+          <div class="sl-logic-item"><span class="sl-dot sl-dot-macro"></span><b>Makro</b>&nbsp;= 156W · aktiv ab Release</div>
+          <div class="sl-logic-item"><span class="sl-dot sl-dot-micro"></span><b>Mikro</b>&nbsp;= COT Index 26W · Trigger 90/10</div>
+          <div class="sl-logic-item"><span class="sl-dot sl-dot-bias"></span><b>Priorität</b>&nbsp;= Makro führt nach Release</div>
+        </div>
+        """
+    )
+
+
 
 
 def _delta_html(value: float, direction_to_release: int | None = None) -> str:
@@ -429,7 +681,416 @@ def _render_table(df: pd.DataFrame):
     st.html(html)
 
 
-def _trader_direction_label(row: pd.Series) -> tuple[str, str]:
+
+def _merge_dual_horizon_into_pipeline(
+    all_markets: pd.DataFrame,
+    pipeline: pd.DataFrame,
+) -> pd.DataFrame:
+    """Add 156W Commercial regime pressure + 26W COT timing to all markets."""
+    base = (
+        pipeline.copy()
+        if pipeline is not None and not pipeline.empty
+        else pd.DataFrame()
+    )
+
+    defaults = {
+        "dual_horizon_active": False,
+        "dual_156w_label": "",
+        "dual_156w_direction": 0,
+        "dual_156w_pct": np.nan,
+        "dual_156w_slope": "",
+        "dual_delta_1w": np.nan,
+        "dual_delta_2w": np.nan,
+        "dual_delta_4w": np.nan,
+        "dual_26w_label": "",
+        "dual_26w_direction": 0,
+        "dual_commercial_index_26w": np.nan,
+        "dual_retail_index_26w": np.nan,
+        "dual_interpretation": "",
+        "dual_action": "",
+        "dual_tone": "neutral",
+    }
+
+    if not base.empty:
+        for col, default in defaults.items():
+            if col not in base.columns:
+                base[col] = default
+
+    if all_markets is None or all_markets.empty:
+        return base
+
+    by_symbol = {}
+    if not base.empty:
+        for idx, row in base.iterrows():
+            by_symbol[str(row.get("symbol", ""))] = idx
+
+    appended = []
+
+    for _, source in all_markets.iterrows():
+        symbol = str(source.get("symbol", ""))
+        if not symbol:
+            continue
+
+        if symbol in by_symbol:
+            idx = by_symbol[symbol]
+            hard_stage = int(base.at[idx, "regime_stage"] or 0)
+            hard_direction = int(
+                np.sign(base.at[idx, "expected_direction"] or 0)
+            )
+        else:
+            idx = None
+            hard_stage = 0
+            hard_direction = 0
+
+        dual = classify_watchlist_row(
+            source,
+            hard_regime_direction=hard_direction,
+            hard_regime_stage=hard_stage,
+        )
+        if not bool(dual["interesting"]):
+            continue
+
+        long_term = dual["long_term"]
+        short_term = dual["short_term"]
+        combined = dual["combined"]
+
+        values = {
+            "dual_horizon_active": True,
+            "dual_156w_label": long_term["label"],
+            "dual_156w_direction": int(long_term["direction"]),
+            "dual_156w_pct": _finite(source.get("commercial_net_percentile")),
+            "dual_156w_slope": long_term["slope_label"],
+            "dual_delta_1w": _finite(
+                source.get("commercial_percentile_change_1w")
+            ),
+            "dual_delta_2w": _finite(
+                source.get("commercial_percentile_change_2w")
+            ),
+            "dual_delta_4w": _finite(
+                source.get("commercial_percentile_change_4w")
+            ),
+            "dual_26w_label": short_term["label"],
+            "dual_26w_direction": int(short_term["direction"]),
+            "dual_commercial_index_26w": _finite(
+                source.get("commercial_index")
+            ),
+            "dual_retail_index_26w": _finite(source.get("retail_index")),
+            "dual_interpretation": combined["interpretation"],
+            "dual_action": combined["action"],
+            "dual_tone": combined["tone"],
+        }
+
+        if idx is not None:
+            for col, value in values.items():
+                base.at[idx, col] = value
+            continue
+
+        new_row = source.to_dict()
+        new_row.update(
+            {
+                "expected_direction": int(long_term["direction"]),
+                "direction_label": (
+                    "BULLISH"
+                    if int(long_term["direction"]) > 0
+                    else "BEARISH"
+                    if int(long_term["direction"]) < 0
+                    else "NEUTRAL"
+                ),
+                "segment": (
+                    "FINANZWERTE"
+                    if str(source.get("asset_class", "")) in {
+                        "Currencies", "Indices", "Rates"
+                    }
+                    else "ROHSTOFFE"
+                ),
+                "regime_stage": 0,
+                "regime_status": "DUAL-HORIZON WATCH",
+                "regime_tone": "neutral",
+                "institutional_aligned": False,
+                "trend_group_aligned": False,
+                "nonreportable_contrarian": False,
+                "price_state": "—",
+                "price_tone": "neutral",
+                "price_confirming": False,
+                "season_overall": "N/V",
+                "season_rank": 0,
+                "research_fx_active": False,
+                "research_direction_conflict": False,
+                **values,
+            }
+        )
+        appended.append(new_row)
+
+    if appended:
+        base = pd.concat(
+            [base, pd.DataFrame(appended)],
+            ignore_index=True,
+            sort=False,
+        )
+
+    if base.empty:
+        return base
+
+    base["_dual_rank"] = (
+        base["dual_horizon_active"].fillna(False).astype(int) * 10
+        + base["dual_26w_direction"].fillna(0).abs().astype(int) * 2
+        + base["dual_156w_direction"].fillna(0).abs().astype(int)
+    )
+
+    return base.sort_values(
+        ["regime_stage", "_dual_rank", "market_name"],
+        ascending=[False, False, True],
+    ).reset_index(drop=True)
+
+
+def _merge_fx_research_into_pipeline(
+    all_markets: pd.DataFrame,
+    pipeline: pd.DataFrame,
+) -> pd.DataFrame:
+    """Merge the frozen FX research overlay into the main trader watchlist.
+
+    Rules:
+    - Non-FX stays on the existing V3.10 regime logic.
+    - FX 75/25 + Raw 1–2W may create an EARLY row even before the hard 80/20
+      pipeline is active.
+    - Existing hard regime stages are never downgraded or bypassed.
+    - If research direction conflicts with an already-active hard regime,
+      the row is marked as conflict and the hard regime direction wins.
+    """
+    base = (
+        pipeline.copy()
+        if pipeline is not None and not pipeline.empty
+        else pd.DataFrame()
+    )
+
+    research_cols = {
+        "research_fx_active": False,
+        "research_bias": "",
+        "research_confidence": "",
+        "research_timing": "",
+        "research_action": "",
+        "research_flow_support": "",
+        "research_dealer_pct_156w": np.nan,
+        "research_release_flow_1w": np.nan,
+        "research_release_flow_2w": np.nan,
+        "research_direction": 0,
+        "research_direction_conflict": False,
+        "research_phase": "",
+    }
+
+    if not base.empty:
+        for col, default in research_cols.items():
+            if col not in base.columns:
+                base[col] = default
+
+    if all_markets is None or all_markets.empty:
+        return base
+
+    fx = all_markets[
+        all_markets["asset_class"].astype(str).eq("Currencies")
+    ].copy()
+    if fx.empty:
+        return base
+
+    rows_by_symbol = {}
+    if not base.empty:
+        for idx, row in base.iterrows():
+            rows_by_symbol[str(row.get("symbol", ""))] = idx
+
+    appended = []
+
+    for _, source in fx.iterrows():
+        symbol = str(source.get("symbol", ""))
+        code = str(source.get("cftc_code", ""))
+        if not symbol or not code:
+            continue
+
+        research = load_fx_research_overlay("Currencies", code)
+        if not bool(research.get("calibrated", False)):
+            continue
+
+        research_active = bool(research.get("active", False))
+        flow_active = bool(
+            research.get("flow_aligned_1w", False)
+            or research.get("flow_aligned_2w", False)
+        )
+        if not (research_active and flow_active):
+            continue
+
+        research_direction = int(
+            np.sign(research.get("expected_direction", 0) or 0)
+        )
+
+        if symbol in rows_by_symbol:
+            idx = rows_by_symbol[symbol]
+            hard_stage = int(base.at[idx, "regime_stage"] or 0)
+            hard_direction = int(
+                np.sign(base.at[idx, "expected_direction"] or 0)
+            )
+            legacy_release = (
+                str(base.at[idx, "cycle_phase"]).upper() == "RELEASE"
+            )
+            price_confirming = bool(
+                base.at[idx, "price_confirming"]
+                if "price_confirming" in base.columns
+                else False
+            )
+
+            conflict = bool(
+                hard_stage > 0
+                and hard_direction != 0
+                and research_direction != 0
+                and hard_direction != research_direction
+            )
+
+            trader = classify_trader_overlay(
+                research,
+                regime_stage=hard_stage,
+                legacy_release=legacy_release,
+                price_confirming=price_confirming,
+            )
+
+            if conflict:
+                trader = {
+                    **trader,
+                    "bias": (
+                        "BULLISH" if hard_direction > 0
+                        else "BEARISH" if hard_direction < 0
+                        else "NEUTRAL"
+                    ),
+                    "confidence": "CONFLICT",
+                    "timing": "WAITING",
+                    "action": "WARTEN · SIGNALKONFLIKT",
+                }
+
+            updates = {
+                "research_fx_active": True,
+                "research_bias": trader.get("bias", ""),
+                "research_confidence": trader.get("confidence", ""),
+                "research_timing": trader.get("timing", ""),
+                "research_action": trader.get("action", ""),
+                "research_flow_support": research.get("flow_support", ""),
+                "research_dealer_pct_156w": research.get(
+                    "dealer_net_oi_percentile_156w", np.nan
+                ),
+                "research_release_flow_1w": research.get(
+                    "release_velocity_1w", np.nan
+                ),
+                "research_release_flow_2w": research.get(
+                    "release_velocity_2w", np.nan
+                ),
+                "research_direction": research_direction,
+                "research_direction_conflict": conflict,
+                "research_phase": research.get("phase", ""),
+            }
+            for col, value in updates.items():
+                base.at[idx, col] = value
+            continue
+
+        trader = classify_trader_overlay(
+            research,
+            regime_stage=0,
+            legacy_release=False,
+            price_confirming=False,
+        )
+        new_row = source.to_dict()
+        new_row.update(
+            {
+                "expected_direction": research_direction,
+                "direction_label": (
+                    "BULLISH"
+                    if research_direction > 0
+                    else "BEARISH"
+                    if research_direction < 0
+                    else "NEUTRAL"
+                ),
+                "segment": "FINANZWERTE",
+                "regime_stage": 0,
+                "regime_status": "EARLY FX WATCH",
+                "regime_tone": (
+                    "bull"
+                    if research_direction > 0
+                    else "bear"
+                    if research_direction < 0
+                    else "neutral"
+                ),
+                "institutional_aligned": False,
+                "trend_group_aligned": False,
+                "nonreportable_contrarian": False,
+                "price_state": "—",
+                "price_tone": "neutral",
+                "price_confirming": False,
+                "season_overall": "N/V",
+                "season_rank": 0,
+                "research_fx_active": True,
+                "research_bias": trader.get("bias", ""),
+                "research_confidence": trader.get("confidence", ""),
+                "research_timing": trader.get("timing", ""),
+                "research_action": trader.get("action", ""),
+                "research_flow_support": research.get("flow_support", ""),
+                "research_dealer_pct_156w": research.get(
+                    "dealer_net_oi_percentile_156w", np.nan
+                ),
+                "research_release_flow_1w": research.get(
+                    "release_velocity_1w", np.nan
+                ),
+                "research_release_flow_2w": research.get(
+                    "release_velocity_2w", np.nan
+                ),
+                "research_direction": research_direction,
+                "research_direction_conflict": False,
+                "research_phase": research.get("phase", ""),
+            }
+        )
+        appended.append(new_row)
+
+    if appended:
+        base = pd.concat(
+            [base, pd.DataFrame(appended)],
+            ignore_index=True,
+            sort=False,
+        )
+
+    if base.empty:
+        return base
+
+    research_rank = {
+        "CONFLICT": 5,
+        "CONFIRMED": 4,
+        "DEVELOPING": 3,
+        "EARLY": 2,
+        "WATCH": 1,
+    }
+    base["_research_rank"] = (
+        base.get("research_confidence", pd.Series("", index=base.index))
+        .map(research_rank)
+        .fillna(0)
+    )
+    base = base.sort_values(
+        ["regime_stage", "_research_rank", "market_name"],
+        ascending=[False, False, True],
+    ).reset_index(drop=True)
+    return base
+
+
+
+def _trader_bias(row: pd.Series) -> tuple[str, str]:
+    if bool(row.get("dual_horizon_active", False)):
+        label = str(row.get("dual_156w_label", "") or "NEUTRAL")
+        direction = int(row.get("dual_156w_direction", 0) or 0)
+        return (
+            label,
+            "bull" if direction > 0 else "bear" if direction < 0 else "neutral",
+        )
+
+    if bool(row.get("research_fx_active", False)):
+        label = str(row.get("research_bias", "") or "NEUTRAL")
+        if "BULL" in label.upper():
+            return label, "bull"
+        if "BEAR" in label.upper() or "BÄR" in label.upper():
+            return label, "bear"
+        return label, "neutral"
+
     direction = int(row.get("expected_direction", 0) or 0)
     stage = int(row.get("regime_stage", 0) or 0)
     if direction > 0:
@@ -438,18 +1099,40 @@ def _trader_direction_label(row: pd.Series) -> tuple[str, str]:
         return ("BEARISH" if stage >= 4 else "BEARISH WATCH", "bear")
     return ("NEUTRAL", "neutral")
 
+def _trader_confidence(row: pd.Series) -> tuple[str, str]:
+    if bool(row.get("research_fx_active", False)):
+        value = str(row.get("research_confidence", "") or "WATCH")
+        tone = (
+            "bad" if value == "CONFLICT"
+            else "good" if value == "CONFIRMED"
+            else "warn" if value in {"EARLY", "DEVELOPING"}
+            else "neutral"
+        )
+        return value, tone
 
-def _trader_phase_summary(stage: int) -> str:
+    stage = int(row.get("regime_stage", 0) or 0)
+    return str(row.get("regime_status", "NORMAL")), (
+        "good" if stage >= 4 else "warn" if stage >= 2 else "neutral"
+    )
+
+
+def _trader_timing(row: pd.Series) -> str:
+    if bool(row.get("dual_horizon_active", False)):
+        return str(row.get("dual_26w_label", "") or "NEUTRAL / MIXED")
+
+    if bool(row.get("research_fx_active", False)):
+        return str(row.get("research_timing", "") or "WAITING")
+
+    stage = int(row.get("regime_stage", 0) or 0)
     return {
-        1: "Commercials historisch extrem",
-        2: "Hedge beginnt sich zu lösen",
-        3: "Weitere CFTC-Gruppen drehen mit",
-        4: "Positionierungsregime bestätigt",
-        5: "Positionierung + Preis bestätigt",
-    }.get(int(stage), "Kein aktiver Regime-Zyklus")
+        1: "EXTREME",
+        2: "TRANSITION",
+        3: "CROSS-GROUP",
+        4: "CONFIRMED",
+        5: "PRICE CONFIRMED",
+    }.get(stage, "WAITING")
 
-
-def _trader_next_step(row: pd.Series) -> str:
+def _legacy_trader_next_step(row: pd.Series) -> str:
     stage = int(row.get("regime_stage", 0) or 0)
     if stage <= 0:
         return "Auf neues 156W-Extrem warten"
@@ -472,8 +1155,75 @@ def _trader_next_step(row: pd.Series) -> str:
     return "S&D-Setup prüfen"
 
 
+def _trader_action(row: pd.Series) -> str:
+    if bool(row.get("dual_horizon_active", False)):
+        dual_action = str(row.get("dual_action", "") or "")
+        if dual_action:
+            return dual_action
+
+    if bool(row.get("research_fx_active", False)):
+        return str(row.get("research_action", "") or "WARTEN")
+    return _legacy_trader_next_step(row)
+
 def _trader_context(row: pd.Series) -> str:
     stage = int(row.get("regime_stage", 0) or 0)
+
+    if bool(row.get("dual_horizon_active", False)):
+        pct = _finite(row.get("dual_156w_pct"))
+        d1 = _finite(row.get("dual_delta_1w"))
+        d2 = _finite(row.get("dual_delta_2w"))
+        d4 = _finite(row.get("dual_delta_4w"))
+        ci = _finite(row.get("dual_commercial_index_26w"))
+        ri = _finite(row.get("dual_retail_index_26w"))
+
+        pct_txt = "—" if not np.isfinite(pct) else f"{pct:.1f}"
+        d1_txt = "—" if not np.isfinite(d1) else f"{d1:+.1f}"
+        d2_txt = "—" if not np.isfinite(d2) else f"{d2:+.1f}"
+        d4_txt = "—" if not np.isfinite(d4) else f"{d4:+.1f}"
+        ci_txt = "—" if not np.isfinite(ci) else f"{ci:.0f}"
+        ri_txt = "—" if not np.isfinite(ri) else f"{ri:.0f}"
+
+        interpretation = escape(
+            str(row.get("dual_interpretation", "") or "—")
+        )
+        slope = escape(str(row.get("dual_156w_slope", "") or "—"))
+        hard = escape(str(row.get("regime_status", "DUAL-HORIZON WATCH")))
+
+        return (
+            f'<span class="tw-context-research">{interpretation}</span>'
+            f'<div class="tw-context-sub">Commercial 156W {pct_txt} · '
+            f'Δ1 {d1_txt} · Δ2 {d2_txt} · Δ4 {d4_txt} · {slope}</div>'
+            f'<div class="tw-context-sub">COT26 C {ci_txt} / Retail {ri_txt} · '
+            f'Regime {hard} {stage}/5</div>'
+        )
+
+    if bool(row.get("research_fx_active", False)):
+        pct = _finite(row.get("research_dealer_pct_156w"))
+        flow1 = _finite(row.get("research_release_flow_1w"))
+        flow2 = _finite(row.get("research_release_flow_2w"))
+        flow_support = escape(
+            str(row.get("research_flow_support", "—") or "—")
+        )
+
+        pct_txt = "—" if not np.isfinite(pct) else f"{pct:.1f}"
+        flow1_txt = "—" if not np.isfinite(flow1) else f"{flow1:+,.0f}"
+        flow2_txt = "—" if not np.isfinite(flow2) else f"{flow2:+,.0f}"
+
+        conflict = bool(row.get("research_direction_conflict", False))
+        head_cls = "tw-context-conflict" if conflict else "tw-context-research"
+        head = (
+            "⚠ Research/Regime Konflikt"
+            if conflict
+            else f"Dealer 156W · {pct_txt}"
+        )
+
+        hard = escape(str(row.get("regime_status", "EARLY FX WATCH")))
+        return (
+            f'<span class="{head_cls}">{head}</span>'
+            f'<div class="tw-context-sub">Raw 1W {flow1_txt} · 2W {flow2_txt}</div>'
+            f'<div class="tw-context-sub">{flow_support} · Regime {hard} {stage}/5</div>'
+        )
+
     if stage < 4:
         return '<span class="tw-muted">—</span>'
 
@@ -492,7 +1242,6 @@ def _trader_context(row: pd.Series) -> str:
         f'<div class="tw-context-sub">Saison · {season}</div>'
     )
 
-
 def _trader_rows_html(df: pd.DataFrame) -> str:
     rows = []
     for _, row in df.iterrows():
@@ -500,10 +1249,18 @@ def _trader_rows_html(df: pd.DataFrame) -> str:
         name = escape(str(market_name_de(row.get("market_name", ""))))
         asset_class = escape(str(row.get("asset_class", "")))
         stage = int(row.get("regime_stage", 0) or 0)
-        stage_label = escape(str(row.get("regime_status", "NORMAL")))
-        direction_label, direction_class = _trader_direction_label(row)
-        summary = escape(_trader_phase_summary(stage))
-        next_step = escape(_trader_next_step(row))
+
+        bias_label, bias_class = _trader_bias(row)
+        confidence, confidence_tone = _trader_confidence(row)
+        timing = escape(_trader_timing(row))
+        action = escape(_trader_action(row))
+        confidence_cls = _tone_class(confidence_tone)
+
+        source_badge = (
+            '<span class="tw-research-badge">FX RESEARCH</span>'
+            if bool(row.get("research_fx_active", False))
+            else ""
+        )
 
         rows.append(
             f"""
@@ -513,25 +1270,25 @@ def _trader_rows_html(df: pd.DataFrame) -> str:
                   <span class="tw-star">☆</span>
                   <div>
                     <a href="?open_market={symbol}">{name}</a>
-                    <div class="tw-sub">{symbol} · {asset_class}</div>
+                    <div class="tw-sub">{symbol} · {asset_class} {source_badge}</div>
                   </div>
                 </div>
               </td>
               <td>
-                <div class="tw-direction {direction_class}">{escape(direction_label)}</div>
+                <div class="tw-direction {bias_class}">{escape(bias_label)}</div>
               </td>
               <td>
-                <div class="tw-phase-head">
-                  <strong>{stage_label}</strong>
-                  <span>{stage}/5</span>
+                <span class="rg-chip {confidence_cls}">{escape(confidence)}</span>
+                <div class="tw-stage-sub">
+                  Regime {escape(str(row.get("regime_status", "NORMAL")))} · {stage}/5
                 </div>
                 {_stage_dots(stage)}
               </td>
               <td>
-                <div class="tw-summary">{summary}</div>
+                <div class="tw-timing">{timing}</div>
               </td>
               <td>
-                <div class="tw-next">{next_step}</div>
+                <div class="tw-next">{action}</div>
               </td>
               <td>
                 {_trader_context(row)}
@@ -540,113 +1297,206 @@ def _trader_rows_html(df: pd.DataFrame) -> str:
             </tr>
             """
         )
+
     return "".join(rows)
 
 
+# Legacy V3.13B header marker: <th>Bias</th>
+# Legacy V3.13B header marker: <th>Timing</th>
 def _render_trader_table(df: pd.DataFrame):
-    if df.empty:
+    """V3.14.2 · slim release-priority trader watchlist."""
+    if df is None or df.empty:
         empty_state(
-            "Keine Märkte in dieser Phase",
-            "Für den aktuellen Report erfüllt kein Markt diesen Pipeline-Zustand.",
+            "Keine Märkte in dieser Auswahl",
+            "Für den aktuellen Report gibt es hier keinen relevanten COT-Kontext.",
         )
         return
 
+    def _seasonality_for_bias(row: pd.Series, bias_direction: int) -> tuple[str, str, str]:
+        if int(bias_direction) == 0:
+            return "—", "season-neutral", "Kein aktiver Bias"
+
+        ticker = str(row.get("ticker", "") or "").strip()
+        if not ticker:
+            return "—", "season-neutral", "Kein Preis-Ticker"
+
+        season = calculate_market_20y_multi_seasonality(
+            ticker=ticker,
+            cot_direction=int(bias_direction),
+        )
+        overall = str(season.get("overall", "N/V") or "N/V").upper()
+        detail = str(season.get("detail", "") or "")
+
+        if "UNTERSTÜTZT" in overall:
+            return "✓", "season-good", detail or overall
+        if "GEGENLÄUFIG" in overall:
+            return "⚠", "season-warn", detail or overall
+        return "—", "season-neutral", detail or overall
+
+    st.html(
+        """
+        <style>
+        .sl-table-wrap{background:#fff;border:1px solid #e3e8ef;border-radius:13px;overflow:hidden;box-shadow:0 1px 2px rgba(15,23,42,.025)}
+        .sl-table{width:100%;border-collapse:collapse;table-layout:fixed;color:#344054}
+        .sl-table th{background:#fbfcfe;color:#667085;font-size:9px;font-weight:760;letter-spacing:.055em;text-transform:uppercase;text-align:left;padding:11px 12px;border-bottom:1px solid #e6eaf0}
+        .sl-table td{padding:14px 12px;border-bottom:1px solid #eef1f5;vertical-align:middle;background:#fff}
+        .sl-table tr:last-child td{border-bottom:0}.sl-table tr:hover td{background:#fbfdfc}
+        .sl-market{display:flex;align-items:center;gap:9px}.sl-star{font-size:14px;color:#98a2b3}
+        .sl-market a{font-size:12px;color:#101828;text-decoration:none;font-weight:730}.sl-market a:hover{color:#16a34a}
+        .sl-sub{font-size:9px;color:#98a2b3;margin-top:3px}.sl-age{font-size:8px;color:#98a2b3;margin-top:4px;font-weight:650;white-space:nowrap}.sl-age-fresh{color:#4f46e5;font-weight:800}
+        .sl-chip{display:inline-flex;align-items:center;padding:6px 9px;border-radius:7px;font-size:9px;font-weight:800;letter-spacing:.02em;white-space:nowrap}
+        .macro-bull{background:#ecfdf3;color:#15803d;border:1px solid #d7f2df}.macro-bear{background:#fff1f2;color:#dc2626;border:1px solid #ffe0e3}.macro-neutral{background:#f2f4f7;color:#667085;border:1px solid #e4e7ec}
+        .micro-bull{background:#eef2ff;color:#4f46e5;border:1px solid #dfe3ff}.micro-bear{background:#f5f0ff;color:#7c3aed;border:1px solid #e9ddff}.micro-neutral{background:#f2f4f7;color:#667085;border:1px solid #e4e7ec}
+        .sl-bias{display:flex;align-items:center;gap:7px;font-size:10px;font-weight:820;color:#101828;white-space:nowrap}
+        .sl-arrow{width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:900}
+        .bias-long{background:#16a34a}.bias-short{background:#dc2626}.bias-neutral{background:#98a2b3}
+        .sl-plan{font-size:10px;font-weight:650;color:#344054;line-height:1.25}
+        .sl-signal{display:inline-flex;justify-content:center;min-width:66px;padding:6px 8px;border-radius:7px;font-size:9px;font-weight:820}
+        .signal-aligned{background:#ecfdf3;color:#15803d;border:1px solid #d7f2df}.signal-watch{background:#fffaeb;color:#b54708;border:1px solid #fef0c7}.signal-neutral{background:#f2f4f7;color:#667085;border:1px solid #e4e7ec}
+        .sl-season{display:inline-flex;width:25px;height:25px;border-radius:7px;align-items:center;justify-content:center;font-size:13px;font-weight:900}
+        .season-good{background:#ecfdf3;color:#15803d}.season-warn{background:#fff7e6;color:#d97706}.season-neutral{background:#f2f4f7;color:#98a2b3}
+        .sl-table th:nth-child(1){width:20%}.sl-table th:nth-child(2){width:17%}.sl-table th:nth-child(3){width:13%}.sl-table th:nth-child(4){width:13%}.sl-table th:nth-child(5){width:8%}.sl-table th:nth-child(6){width:19%}.sl-table th:nth-child(7){width:10%}
+        @media(max-width:950px){.sl-table th:nth-child(6),.sl-table td:nth-child(6){display:none}.sl-table th:nth-child(1){width:24%}.sl-table th:nth-child(2){width:20%}.sl-table th:nth-child(3){width:16%}.sl-table th:nth-child(4){width:16%}.sl-table th:nth-child(5){width:10%}.sl-table th:nth-child(7){width:14%}}
+        </style>
+        """
+    )
+
+    rows = []
+    for _, row in df.iterrows():
+        decision = classify_macro_micro_trade(row)
+        macro = decision["macro"]
+        micro = decision["micro"]
+        bias_direction = int(decision["bias_direction"])
+        try:
+            macro_age_weeks = int(
+                float(row.get("macro_status_age_weeks", 0) or 0)
+            )
+        except (TypeError, ValueError):
+            macro_age_weeks = 0
+
+        if macro_age_weeks > 0:
+            macro_age_label = (
+                f"Release seit {macro_age_weeks}W"
+                if str(macro.get("phase", "")).upper() == "CONFIRMED"
+                else f"seit {macro_age_weeks}W"
+            )
+            macro_age_html = (
+                f'<div class="sl-age">{escape(macro_age_label)}</div>'
+            )
+        else:
+            macro_age_html = ""
+
+        micro_age = int(micro.get("age_weeks", -1))
+        if int(micro.get("direction", 0) or 0) == 0 or micro_age < 0:
+            micro_age_html = ""
+        else:
+            micro_age_label = "diese Woche" if micro_age == 0 else f"vor {micro_age}W"
+            age_class = "sl-age sl-age-fresh" if bool(micro.get("fresh", False)) else "sl-age"
+            micro_age_html = (
+                f'<div class="{age_class}">{escape(micro_age_label)}</div>'
+            )
+
+        symbol_raw = str(row.get("symbol", "") or "")
+        symbol = escape(symbol_raw)
+        name = escape(str(market_name_de(row.get("market_name", ""))))
+        asset_class = escape(str(row.get("asset_class", "")))
+
+        macro_cls = (
+            "macro-bull" if int(macro["direction"]) > 0
+            else "macro-bear" if int(macro["direction"]) < 0
+            else "macro-neutral"
+        )
+        micro_cls = (
+            "micro-bull" if int(micro["direction"]) > 0
+            else "micro-bear" if int(micro["direction"]) < 0
+            else "micro-neutral"
+        )
+        bias_cls = (
+            "bias-long" if bias_direction > 0
+            else "bias-short" if bias_direction < 0
+            else "bias-neutral"
+        )
+        arrow = "↑" if bias_direction > 0 else "↓" if bias_direction < 0 else "–"
+        signal_cls = (
+            "signal-aligned"
+            if decision["signal"] == "ALIGNED"
+            else "signal-watch"
+            if decision["signal"] == "WATCH"
+            else "signal-neutral"
+        )
+
+        season_mark, season_cls, season_help = _seasonality_for_bias(
+            row,
+            bias_direction,
+        )
+
+        rows.append(
+            f"""
+            <tr>
+              <td><div class="sl-market"><span class="sl-star">☆</span><div><a href="?open_market={symbol}">{name}</a><div class="sl-sub">{symbol} · {asset_class}</div></div></div></td>
+              <td><span class="sl-chip {macro_cls}">{escape(str(macro["label"]))}</span>{macro_age_html}</td>
+              <td><span class="sl-chip {micro_cls}">{escape(str(micro["label"]))}</span>{micro_age_html}</td>
+              <td><div class="sl-bias"><span class="sl-arrow {bias_cls}">{arrow}</span>{escape(str(decision["bias"]))}</div></td>
+              <td><span class="sl-season {season_cls}" title="{escape(season_help)}">{season_mark}</span></td>
+              <td><div class="sl-plan">{escape(str(decision["plan"]))}</div></td>
+              <td><span class="sl-signal {signal_cls}">{escape(str(decision["signal"]))}</span></td>
+            </tr>
+            """
+        )
+
     st.html(
         f"""
-        <style>
-        .tw-wrap{{
-            background:#fff;
-            border:1px solid #e3e8ef;
-            border-radius:13px;
-            overflow:hidden;
-            box-shadow:0 1px 2px rgba(15,23,42,.025);
-        }}
-        table.tw-table{{
-            width:100%;
-            border-collapse:collapse;
-            table-layout:fixed;
-            color:#344054;
-        }}
-        .tw-table th{{
-            background:#fbfcfe;
-            color:#667085;
-            font-size:9px;
-            font-weight:750;
-            letter-spacing:.055em;
-            text-transform:uppercase;
-            text-align:left;
-            padding:11px 12px;
-            border-bottom:1px solid #e6eaf0;
-        }}
-        .tw-table td{{
-            padding:14px 12px;
-            border-bottom:1px solid #eef1f5;
-            vertical-align:middle;
-            background:#fff;
-        }}
-        .tw-table tr:last-child td{{border-bottom:0}}
-        .tw-table tr:hover td{{background:#fbfdfb}}
-        .tw-market{{display:flex;align-items:center;gap:9px}}
-        .tw-star{{font-size:15px;color:#98a2b3}}
-        .tw-market a{{font-size:12px;color:#101828;text-decoration:none;font-weight:720}}
-        .tw-market a:hover{{color:#16a34a}}
-        .tw-sub{{font-size:9px;color:#98a2b3;margin-top:3px}}
-        .tw-direction{{font-size:10px;font-weight:800;letter-spacing:.025em}}
-        .tw-direction.bull{{color:#15803d}}
-        .tw-direction.bear{{color:#dc2626}}
-        .tw-direction.neutral{{color:#667085}}
-        .tw-phase-head{{display:flex;align-items:center;justify-content:space-between;gap:8px}}
-        .tw-phase-head strong{{font-size:10px;color:#344054}}
-        .tw-phase-head span{{font-size:9px;color:#98a2b3}}
-        .tw-summary{{font-size:11px;font-weight:630;color:#475467;line-height:1.4}}
-        .tw-next{{font-size:11px;font-weight:700;color:#101828;line-height:1.4}}
-        .tw-context-ok{{font-size:10px;font-weight:750;color:#15803d}}
-        .tw-context-sub{{font-size:9px;color:#98a2b3;margin-top:4px}}
-        .tw-muted{{font-size:11px;color:#c0c7d1}}
-        .tw-open{{text-align:right;color:#98a2b3;font-size:19px}}
-        .tw-table .rg-stagebar{{max-width:120px;margin-top:7px}}
-        .tw-table th:nth-child(1){{width:17%}}
-        .tw-table th:nth-child(2){{width:12%}}
-        .tw-table th:nth-child(3){{width:17%}}
-        .tw-table th:nth-child(4){{width:19%}}
-        .tw-table th:nth-child(5){{width:22%}}
-        .tw-table th:nth-child(6){{width:11%}}
-        .tw-table th:nth-child(7){{width:2%}}
-        @media(max-width:1050px){{
-            .tw-table th:nth-child(4),.tw-table td:nth-child(4){{display:none}}
-            .tw-table th:nth-child(1){{width:22%}}
-            .tw-table th:nth-child(2){{width:15%}}
-            .tw-table th:nth-child(3){{width:22%}}
-            .tw-table th:nth-child(5){{width:25%}}
-            .tw-table th:nth-child(6){{width:14%}}
-            .tw-table th:nth-child(7){{width:2%}}
-        }}
-        </style>
-        <div class="tw-wrap">
-          <table class="tw-table">
-            <thead>
-              <tr>
-                <th>Markt</th>
-                <th>Richtung</th>
-                <th>Regime</th>
-                <th>Was passiert?</th>
-                <th>Nächster Schritt</th>
-                <th>Kontext</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>{_trader_rows_html(df)}</tbody>
+        <div class="sl-table-wrap">
+          <table class="sl-table">
+            <thead><tr><th>Markt</th><th>Makro</th><th>Mikro</th><th>Bias</th><th>Season</th><th>Plan</th><th>Signal</th></tr></thead>
+            <tbody>{''.join(rows)}</tbody>
           </table>
         </div>
         """
     )
 
 
+
+# V3.13B · UNIFIED TRADER WATCHLIST
+# V3.14.0 · DUAL-HORIZON COT WATCHLIST
 _pipeline_css()
+# V3.14.3 · ASSET CLASS WATCHLIST SCOPE
+_watchlist_asset_scope = st.session_state.pop(
+    "_watchlist_asset_scope_once",
+    None,
+)
+_watchlist_asset_labels = {
+    "Currencies": "Währungen",
+    "Cryptocurrencies": "Kryptowährungen",
+    "Indices": "Indizes",
+    "Rates": "US-Zinsen",
+    "Volatility": "Volatilität",
+    "Energy": "Energie",
+    "Metals": "Metalle",
+    "Soft Commodities": "Soft-Rohstoffe",
+    "Grains": "Getreide",
+    "Livestock": "Vieh",
+    "Forest Products": "Forstprodukte",
+}
+_watchlist_scope_label = _watchlist_asset_labels.get(
+    str(_watchlist_asset_scope),
+    str(_watchlist_asset_scope or ""),
+)
+_watchlist_page_title = (
+    f"COT Watchlist · {_watchlist_scope_label}"
+    if _watchlist_asset_scope
+    else "COT Watchlist"
+)
+_watchlist_page_subtitle = (
+    f"COT Watchlist-Logik innerhalb der Assetklasse {_watchlist_scope_label}."
+    if _watchlist_asset_scope
+    else "Makro-Kontext und Mikro-Timing auf einen Blick."
+)
+
 page_header(
     "Research · Positioning Regime",
-    "COT Positioning Watchlist",
-    "Institutionelle Positionierungszyklen Schritt für Schritt beobachten. Erst das Zusammenspiel erzeugt Trade-Kontext.",
+    _watchlist_page_title,
+    _watchlist_page_subtitle,
     "V3.10.0 · DIVIDE & CONQUER",
 )
 
@@ -665,6 +1515,17 @@ with st.spinner("Commercial-156W-Zustände werden geprüft …"):
 all_markets = scan["all_markets"].copy()
 with st.spinner("Transitions und CFTC-Gruppen werden nach Pipeline-Stufe ergänzt …"):
     pipeline = _build_pipeline_rows(all_markets)
+    pipeline = _merge_fx_research_into_pipeline(all_markets, pipeline)
+    pipeline = _merge_dual_horizon_into_pipeline(all_markets, pipeline)
+    pipeline = _ensure_fresh_micro_rows(all_markets, pipeline)
+    # V3.14.3 · same pipeline, scoped to one peer asset class when opened
+    # through an indented asset-class navigation page.
+    if _watchlist_asset_scope:
+        pipeline = pipeline[
+            pipeline["asset_class"]
+            .astype(str)
+            .eq(str(_watchlist_asset_scope))
+        ].reset_index(drop=True)
 
 # Click-through from custom HTML table.
 open_symbol = str(st.query_params.get("open_market", "") or "").strip()
@@ -679,11 +1540,8 @@ if open_symbol and not pipeline.empty:
         st.switch_page("pages/marktanalyse.py")
 
 _kpis(pipeline, scan.get("latest_report"))
-st.html(
-    '<div class="rg-note"><b>Teile &amp; herrsche:</b> Commercial Net Percentile 156W ist die Ausgangslage. '
-    'Ein Extrem erhöht nur die Aufmerksamkeit. Erst Transition → andere CFTC-Gruppen → konträrer Nonreportable-Kontext → Preisstruktur erzeugen schrittweise Evidenz. '
-    '<b>Der 26W-COT-Index ist aus dieser Hauptansicht entfernt</b> und bleibt nur im Advanced Research / als ML-Feature erhalten.</div>'
-)
+# V3.13B: Early FX is merged into the primary trader table.
+
 
 if pipeline.empty:
     empty_state("Keine aktiven Positionierungszyklen", "Aktuell steht kein Markt in einer 156W-Extrem- oder aktiven Release-Phase.")
@@ -692,7 +1550,7 @@ else:
     with c1:
         view = st.radio(
             "Phase",
-            ["Alle", "Extreme", "Transition", "Cross-Group", "Confirmed", "Context Ready"],
+            ["Alle", "Fresh Micro", "Aligned", "Watch", "Context Ready"],
             horizontal=True,
             label_visibility="collapsed",
         )
@@ -702,9 +1560,27 @@ else:
         direction_filter = st.selectbox("Richtung", ["Alle Richtungen", "Bullish Reversal", "Bearish Reversal"], label_visibility="collapsed")
 
     filtered = pipeline.copy()
-    stage_map = {"Extreme": 1, "Transition": 2, "Cross-Group": 3, "Confirmed": 4, "Context Ready": 5}
-    if view in stage_map:
-        filtered = filtered[filtered["regime_stage"] == stage_map[view]]
+
+    if view == "Fresh Micro":
+        if "micro_trigger_fresh" in filtered.columns:
+            filtered = filtered[filtered["micro_trigger_fresh"].fillna(False)]
+            if "micro_trigger_age_weeks" in filtered.columns:
+                filtered = filtered.sort_values(
+                    ["micro_trigger_age_weeks", "market_name"],
+                    ascending=[True, True],
+                )
+        else:
+            filtered = filtered.iloc[0:0]
+    elif view in {"Aligned", "Watch"}:
+        keep = []
+        for _, filter_row in filtered.iterrows():
+            decision = classify_macro_micro_trade(filter_row)
+            keep.append(decision["signal"] == view.upper())
+        filtered = filtered[pd.Series(keep, index=filtered.index)]
+    elif view == "Context Ready":
+        filtered = filtered[
+            pd.to_numeric(filtered["regime_stage"], errors="coerce").fillna(0) >= 5
+        ]
     if segment != "Alle":
         filtered = filtered[filtered["segment"].astype(str).eq(segment)]
     if direction_filter == "Bullish Reversal":
@@ -718,7 +1594,7 @@ else:
     with st.expander("Quant-Details · COT-Gruppen & Rohdaten", expanded=False):
         st.caption(
             "Vollständige Research-Ansicht für Quant-Kontrolle. "
-            "Die Trader-Watchlist oben verwendet ausschließlich die bereits berechnete Regime-Verdichtung."
+            "Die Trader-Watchlist trennt jetzt für alle Märkte zwei Horizonte: Commercial-Netto 156W = langsamer Regime-Druck; Commercial/Retail COT-Index 26W = kurzfristiges Timing. Cross-Group und Preis bleiben Bestätigung. FX behält zusätzlich das eingefrorene Raw-1–2W-Research."
         )
         _render_table(trader_view)
 

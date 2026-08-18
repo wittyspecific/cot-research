@@ -62,6 +62,7 @@ from src.prices import load_prices, price_alignment_audit
 from src.publication import publication_info
 from src.report_analysis import enrich_report_positioning
 from src.positioning_regime import classify_regime_stage, load_cross_group_context, load_price_structure
+from src.research_informed_positioning import load_fx_research_overlay, classify_trader_overlay
 from src.nc_divergence import (
     build_divergence_history,
     current_divergence,
@@ -647,6 +648,17 @@ regime_stage = classify_regime_stage(
     price=regime_price,
 )
 
+# V3.13A · Research-informed FX overlay.
+# 156W Net/OI + soft 75/25 + raw Dealer release velocity 1–2W.
+# Existing 80/20 production gates, FTMO risk and execution remain unchanged.
+research_fx = load_fx_research_overlay(asset_class, str(code))
+trader_overlay = classify_trader_overlay(
+    research_fx,
+    regime_stage=int(regime_stage.get("stage", 0) or 0),
+    legacy_release=str(cycle.get("phase", "")).upper() == "RELEASE",
+    price_confirming=bool(regime_price.get("confirming", False)),
+)
+
 
 # ------------------------------------------------------------------
 # Compact research hierarchy
@@ -904,6 +916,50 @@ def _regime_trader_next_step(stage: int, cycle_phase: str, nonreportable_contrar
     return "Kontext vollständig entwickelt: Jetzt separat S&D-Zone, Entry, SL, TP und Risiko prüfen."
 
 
+def _render_research_trader_overlay() -> None:
+    if not bool(trader_overlay.get("calibrated", False)):
+        return
+
+    bias = _regime_ui_safe(trader_overlay.get("bias", "NEUTRAL"))
+    confidence = _regime_ui_safe(trader_overlay.get("confidence", "WATCH"))
+    timing = _regime_ui_safe(trader_overlay.get("timing", "WAITING"))
+    action = _regime_ui_safe(trader_overlay.get("action", "WARTEN"))
+    pct = research_fx.get("dealer_net_oi_percentile_156w", np.nan)
+    v1 = research_fx.get("release_velocity_1w", np.nan)
+    v2 = research_fx.get("release_velocity_2w", np.nan)
+    flow = _regime_ui_safe(research_fx.get("flow_support", "—"))
+
+    pct_txt = "—" if pd.isna(pct) else f"{float(pct):.1f}"
+    v1_txt = "—" if pd.isna(v1) else f"{float(v1):+,.0f}"
+    v2_txt = "—" if pd.isna(v2) else f"{float(v2):+,.0f}"
+
+    st.html(
+        f"""
+        <style>
+        .ri-wrap{{margin:10px 0 16px}}
+        .ri-title{{font-size:10px;font-weight:800;letter-spacing:.07em;color:#667085;text-transform:uppercase;margin-bottom:8px}}
+        .ri-grid{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}}
+        .ri-card{{background:#fff;border:1px solid #e3e8ef;border-radius:11px;padding:13px 14px;min-height:78px}}
+        .ri-label{{font-size:9px;color:#667085;font-weight:760;letter-spacing:.055em;text-transform:uppercase}}
+        .ri-value{{font-size:17px;color:#101828;font-weight:760;margin-top:5px;line-height:1.2}}
+        .ri-sub{{font-size:9px;color:#98a2b3;margin-top:5px;line-height:1.35}}
+        .ri-note{{font-size:9px;color:#667085;margin-top:8px;line-height:1.45}}
+        @media(max-width:800px){{.ri-grid{{grid-template-columns:repeat(2,minmax(0,1fr))}}}}
+        </style>
+        <div class="ri-wrap">
+          <div class="ri-title">RESEARCH-INFORMED FX OVERLAY · V3.13A</div>
+          <div class="ri-grid">
+            <div class="ri-card"><div class="ri-label">BIAS</div><div class="ri-value">{bias}</div><div class="ri-sub">TFF Dealer Net/OI 156W · {pct_txt}</div></div>
+            <div class="ri-card"><div class="ri-label">CONFIDENCE</div><div class="ri-value">{confidence}</div><div class="ri-sub">Raw Release Flow · {flow}</div></div>
+            <div class="ri-card"><div class="ri-label">TIMING</div><div class="ri-value">{timing}</div><div class="ri-sub">orientiert 1W {v1_txt} · 2W {v2_txt}</div></div>
+            <div class="ri-card"><div class="ri-label">ACTION</div><div class="ri-value">{action}</div><div class="ri-sub">S&amp;D / Entry / SL / TP separat</div></div>
+          </div>
+          <div class="ri-note">Research Freeze: 156W · soft 75/25 · Raw Velocity 1–2W · 8W Forward · Status HOLD. 75/25 ist nur Early-Watch; die bestehende 80/20-Regime-/Release-Logik und das FTMO-Risiko bleiben unverändert. Timing „DEVELOPED/LATE“ ist bewusst eine operative Heuristik, kein empirisch eingefrorener Maturity-Parameter.</div>
+        </div>
+        """
+    )
+
+
 def _render_regime_trader_overview() -> None:
     stage = int(regime_stage.get("stage", 0) or 0)
     stage = max(0, min(5, stage))
@@ -1018,6 +1074,7 @@ def _render_regime_trader_overview() -> None:
     )
 
 
+_render_research_trader_overlay()
 _render_regime_trader_overview()
 
 stage_summary(

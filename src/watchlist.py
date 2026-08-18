@@ -13,6 +13,8 @@ from .analysis import (
     net_validation,
     positioning_velocity_state,
 )
+from .micro_trigger import latest_micro_trigger
+from .status_age import macro_status_age_weeks, micro_status_age_weeks
 from .cftc import load_cftc_universe, load_history, resolve_market
 from .markets import CLASSIC_MARKETS
 from .config import (
@@ -262,6 +264,20 @@ def scan_classic_markets(
                     release_active_weeks=int(release_active_weeks),
                 )
                 signal_direction = int(cycle.get("direction", 0) or 0)
+                micro_trigger = latest_micro_trigger(
+                    cot, upper=90.0, lower=10.0, fresh_weeks=2
+                )
+                macro_age_weeks = macro_status_age_weeks(
+                    cot,
+                    cycle,
+                    upper=validation_upper,
+                    lower=validation_lower,
+                )
+                micro_age_weeks = micro_status_age_weeks(
+                    cot,
+                    upper=upper,
+                    lower=lower,
+                )
                 extreme_direction = int(cycle.get("extreme_direction", 0) or 0)
                 context_direction = signal_direction if cycle.get("phase") == "RELEASE" else extreme_direction
 
@@ -353,6 +369,15 @@ def scan_classic_markets(
                     "signal_active": bool(signal_active),
                     "extreme_duration": int(cycle.get("extreme_duration", 0) or 0),
                     "weeks_since_release": cycle.get("weeks_since_release", np.nan),
+                    "macro_status_age_weeks": int(macro_age_weeks),
+                    "micro_status_age_weeks": int(micro_age_weeks),
+                    "micro_trigger_direction": int(micro_trigger.get("direction", 0) or 0),
+                    "micro_trigger_label": str(micro_trigger.get("label", "—") or "—"),
+                    "micro_trigger_age_weeks": int(micro_trigger.get("age_weeks", -1)),
+                    "micro_trigger_fresh": bool(micro_trigger.get("fresh", False)),
+                    "micro_trigger_value": micro_trigger.get("trigger_value", np.nan),
+                    "micro_current_index_26w": micro_trigger.get("current_value", np.nan),
+                    "micro_trigger_report_date": micro_trigger.get("trigger_report_date", pd.NaT),
                     "extreme_percentile": cycle.get("extreme_percentile", np.nan),
                     "extreme_index": cycle.get("extreme_index", np.nan),
                     "extreme_net": cycle.get("extreme_net", np.nan),

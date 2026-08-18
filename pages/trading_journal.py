@@ -1,4 +1,5 @@
 from __future__ import annotations
+# V3.14.6 · JOURNAL ML SNAPSHOT & EXECUTION RR
 
 import numpy as np
 import pandas as pd
@@ -8,6 +9,8 @@ from src.deployment_mode import REMOTE_GATEWAY, deployment_config_from_mapping
 from src.journal_gateway_client import JournalGatewayClient, JournalGatewayError, config_from_mapping as gateway_config_from_mapping
 from src.mt5_account import MT5BridgeError, MT5ConfigError, MT5ConnectionError, MT5UnavailableError, config_from_mapping
 from src.mt5_history import MT5HistoryError
+from src.journal_execution_metrics import effective_rr, rr_source
+from src.journal_strategy_view import find_strategy_logic_blocks
 from src.outcome_tracker import sync_trade_outcomes
 from src.price_units import mt5_price_to_plan, price_factor_to_mt5
 from src.style import apply_style, context_strip, definition, metric_card, page_header, section_line
@@ -234,7 +237,10 @@ if plans.empty:
 view = plans.copy()
 view["created"] = pd.to_datetime(view["created_at_local"], errors="coerce").dt.strftime("%d.%m.%Y %H:%M")
 view["ID"] = view["trade_id"].map(_short_id)
-view["R:R"] = pd.to_numeric(view["planned_rr"], errors="coerce").map(lambda x: f"{x:.2f}R" if pd.notna(x) else "—")
+view["EffectiveRR"] = view.apply(effective_rr, axis=1)
+view["R:R"] = view["EffectiveRR"].map(
+    lambda x: f"{float(x):.2f}R" if x is not None and pd.notna(x) else "—"
+)
 view["Result"] = pd.to_numeric(view.get("result_r"), errors="coerce").map(_fmt_r)
 view["Status"] = view.get("lifecycle_status", pd.Series(index=view.index, dtype=object)).fillna("PLANNED")
 view["Trader"] = view.get("trader_display_name", pd.Series(index=view.index, dtype=object)).fillna("Legacy")
@@ -267,7 +273,13 @@ with c2:
     entry_label = _entry_display(row)
     metric_card("ENTRY / SL", f"{entry_label} / {row['stop']}", f"TP {row['target'] if pd.notna(row['target']) else '—'}")
 with c3:
-    metric_card("PLAN R:R", f"{row['planned_rr']:.2f}R" if pd.notna(row["planned_rr"]) else "—", str(row["timeframe"]))
+    _detail_rr = effective_rr(row)
+    _detail_rr_label = "EXECUTION R:R" if rr_source(row) == "EXECUTION" else "PLAN R:R"
+    metric_card(
+        _detail_rr_label,
+        f"{float(_detail_rr):.2f}R" if _detail_rr is not None and np.isfinite(float(_detail_rr)) else "—",
+        "echter MARKET-Fill → SL/TP" if _detail_rr_label == "EXECUTION R:R" else str(row["timeframe"]),
+    )
 with c4:
     status = str(row.get("lifecycle_status") or "PLANNED") if pd.notna(row.get("lifecycle_status")) else "PLANNED"
     metric_card("OUTCOME", status, _fmt_r(row.get("result_r")))
@@ -339,6 +351,38 @@ if outcome:
             fwd.append(f"{days}T {float(value)*100:+.2f}%")
     if fwd:
         st.caption("Directional Forward Return · " + " · ".join(fwd))
+
+_strategy_blocks = find_strategy_logic_blocks(snapshot)
+with st.expander("Strategie-Snapshot · beim Trade eingefroren", expanded=False):
+    if not _strategy_blocks:
+        st.caption(
+            "Älterer Trade: Für diesen Plan existiert noch kein versionierter V3.14.6-Strategie-Snapshot. "
+            "Er wird nicht rückwirkend mit heutiger Logik beschriftet."
+        )
+    else:
+        for _strategy_path, _logic in _strategy_blocks:
+            _macro = dict(_logic.get("macro") or {})
+            _micro = dict(_logic.get("micro") or {})
+            _decision = dict(_logic.get("decision") or {})
+            _stage = dict(_macro.get("stage") or {})
+            _micro_age = _micro.get("age_weeks", "—")
+            _micro_status = "frisch" if _micro.get("fresh") else f"Alter {_micro_age}W"
+            _stage_text = (
+                f" · Stage {_stage.get('stage')} {_stage.get('label', '')}"
+                if _stage else ""
+            )
+            st.markdown(
+                f"**{_logic.get('logic_version', '—')}** · `{_strategy_path}`  \n"
+                f"**Makro:** {_macro.get('phase') or '—'} · {_macro.get('state') or '—'}{_stage_text}  \n"
+                f"**Mikro:** {_micro.get('label') or '—'} · {_micro_status}  \n"
+                f"**Entscheidung:** {_decision.get('bias') or '—'} · "
+                f"{_decision.get('plan') or '—'} · {_decision.get('signal') or '—'}"
+            )
+            st.caption(
+                "156W = Struktur/Release · 26W = eventbasierter 90/10 Fresh-Micro-Trigger · "
+                "Seasonality = Confluence only. Rohwerte bleiben für ML im eingefrorenen Snapshot."
+            )
+            st.json(_logic, expanded=False)
 
 with st.expander("Vollständigen eingefrorenen Snapshot anzeigen", expanded=False):
     st.json(snapshot, expanded=False)

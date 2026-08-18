@@ -14,3 +14,6 @@ __pycache__/
 *.p12
 *.pfx
 gateway_key.txt
+
+# Local patch backups
+*.bak

@@ -86,7 +86,7 @@ def test_ui_keeps_156w_primary_and_26w_advanced():
 
 def test_snapshot_stores_state_transition_release_and_keeps_legacy_index():
     snapshot = (ROOT / "src/trade_snapshot.py").read_text(encoding="utf-8")
-    assert 'SNAPSHOT_BUILDER_VERSION = "V3.10.0"' in snapshot
+    assert 'SNAPSHOT_BUILDER_VERSION = "V3.14.6"' in snapshot
     assert '"commercial_net_percentile_156w"' in snapshot
     assert '"commercial_percentile_delta_1w"' in snapshot
     assert '"commercial_percentile_delta_4w"' in snapshot

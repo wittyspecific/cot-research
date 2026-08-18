@@ -63,12 +63,19 @@ from .prices import load_prices, price_alignment_audit
 from .price_units import auto_market_reference_entry, plan_price_to_mt5, price_factor_to_mt5
 from .publication import publication_info
 from .report_analysis import enrich_report_positioning
+from .micro_trigger import (
+    MICRO_TRIGGER_FRESH_WEEKS,
+    MICRO_TRIGGER_LOWER,
+    MICRO_TRIGGER_UPPER,
+    latest_micro_trigger,
+)
 from .positioning_regime import classify_regime_stage, load_cross_group_context, load_price_structure
 from .seasonality import forward_statistics, seasonal_consistency
+from .watchlist_macro_micro import classify_macro_micro_trade
 from .watchlist_seasonality_core import classify_asset_seasonality, summarize_multi_horizon
 
 
-SNAPSHOT_BUILDER_VERSION = "V3.10.0"
+SNAPSHOT_BUILDER_VERSION = "V3.14.6"
 
 
 def _finite(value: Any) -> float:
@@ -236,6 +243,114 @@ def _seasonality_snapshot(prices: pd.DataFrame, cot_direction: int) -> dict[str,
     }
 
 
+def _v3146_strategy_logic_snapshot(cot: pd.DataFrame, result: Mapping[str, Any]) -> dict[str, Any]:
+    """Freeze the exact trader decision contract used at plan time."""
+    regime = dict(result.get("positioning_regime") or {})
+    cycle = dict((result.get("legacy") or {}).get("hedger_cycle") or {})
+    stage = dict(regime.get("stage") or {})
+
+    micro = latest_micro_trigger(
+        cot,
+        upper=MICRO_TRIGGER_UPPER,
+        lower=MICRO_TRIGGER_LOWER,
+        fresh_weeks=MICRO_TRIGGER_FRESH_WEEKS,
+    )
+
+    age_raw = micro.get("age_weeks", -1)
+    try:
+        micro_age = int(age_raw)
+    except (TypeError, ValueError):
+        micro_age = -1
+
+    decision_row = {
+        "context_direction": int(regime.get("expected_direction", 0) or 0),
+        "cycle_phase": str(regime.get("commercial_phase") or cycle.get("phase") or ""),
+        "transition_state": str(regime.get("commercial_transition") or cycle.get("transition") or ""),
+        "regime_stage": int(stage.get("stage", 0) or 0),
+        "micro_trigger_direction": int(micro.get("direction", 0) or 0),
+        "micro_trigger_age_weeks": micro_age,
+        "micro_trigger_fresh": bool(micro.get("fresh", False)),
+        "micro_trigger_value": micro.get("trigger_value"),
+        "micro_current_index_26w": micro.get("current_value"),
+    }
+    decision = classify_macro_micro_trade(decision_row)
+
+    trigger_date = micro.get("trigger_report_date")
+    if trigger_date is None or pd.isna(trigger_date):
+        trigger_date_value = None
+    else:
+        trigger_date_value = pd.Timestamp(trigger_date).isoformat()
+
+    return {
+        "logic_version": "V3.14.5",
+        "snapshot_contract_version": "V3.14.6",
+        "feature_timing": "PLAN_TIME",
+        "macro_policy": {
+            "metric": "Commercial Net Percentile",
+            "window_weeks": 156,
+            "upper": 80.0,
+            "lower": 20.0,
+            "extreme_transition_active": False,
+            "release_active": True,
+            "priority_rule": "MACRO_LEADS_FROM_RELEASE",
+        },
+        "micro_policy": {
+            "metric": "Commercial COT Index",
+            "window_weeks": 26,
+            "trigger_upper": float(MICRO_TRIGGER_UPPER),
+            "trigger_lower": float(MICRO_TRIGGER_LOWER),
+            "fresh_weeks": int(MICRO_TRIGGER_FRESH_WEEKS),
+            "event_rule": "ENTRY_INTO_90_10_ZONE",
+            "pre_release_rule": "ONLY_FRESH_MICRO_DRIVES_TRADE",
+        },
+        "seasonality_policy": {
+            "role": "CONFLUENCE_ONLY",
+            "creates_direction": False,
+        },
+        "macro": {
+            "expected_direction": int(regime.get("expected_direction", 0) or 0),
+            "state": str(regime.get("commercial_state") or cycle.get("state") or ""),
+            "phase": str(regime.get("commercial_phase") or cycle.get("phase") or ""),
+            "transition": str(regime.get("commercial_transition") or cycle.get("transition") or ""),
+            "current_percentile_156w": regime.get("commercial_net_percentile_156w"),
+            "extreme_percentile_156w": regime.get("commercial_extreme_percentile_156w"),
+            "delta_1w": regime.get("commercial_delta_1w"),
+            "delta_2w": regime.get("commercial_delta_2w"),
+            "delta_4w": regime.get("commercial_delta_4w"),
+            "extreme_duration_weeks": cycle.get("extreme_duration"),
+            "weeks_since_release": cycle.get("weeks_since_release"),
+            "stage": stage,
+        },
+        "micro": {
+            "direction": int(micro.get("direction", 0) or 0),
+            "label": str(micro.get("label") or "—"),
+            "age_weeks": micro_age,
+            "fresh": bool(micro.get("fresh", False)),
+            "trigger_value": micro.get("trigger_value"),
+            "current_value": micro.get("current_value"),
+            "trigger_report_date": trigger_date_value,
+        },
+        "cross_group_confirmation": {
+            "institutional_label": regime.get("institutional_label"),
+            "institutional": regime.get("institutional"),
+            "trend_group_label": regime.get("trend_group_label"),
+            "trend_group": regime.get("trend_group"),
+            "nonreportable_percentile_156w": regime.get("nonreportable_percentile_156w"),
+            "nonreportable": regime.get("nonreportable"),
+            "price": regime.get("price"),
+            "stage": stage,
+        },
+        "decision": {
+            "bias": decision.get("bias"),
+            "bias_direction": int(decision.get("bias_direction", 0) or 0),
+            "plan": decision.get("plan"),
+            "signal": decision.get("signal"),
+            "macro": decision.get("macro"),
+            "micro": decision.get("micro"),
+        },
+    }
+
+
 def collect_market_research_snapshot(asset_class: str, market: Mapping[str, Any]) -> dict[str, Any]:
     """Capture the current research state for one CFTC market without future recomputation."""
     result: dict[str, Any] = {
@@ -356,6 +471,9 @@ def collect_market_research_snapshot(asset_class: str, market: Mapping[str, Any]
             nonreportable=result["positioning_regime"].get("nonreportable"),
             price=price_context,
         )
+
+    if "positioning_regime" in result:
+        result["strategy_logic"] = _v3146_strategy_logic_snapshot(cot, result)
 
     try:
         result["seasonality"] = _seasonality_snapshot(prices, int(result["legacy"]["confirmation_4of4"]["direction"]))
