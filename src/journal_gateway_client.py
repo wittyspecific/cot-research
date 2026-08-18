@@ -171,6 +171,38 @@ class JournalGatewayClient:
         payload = self._request("GET", "/v1/trades", params=params)
         return pd.DataFrame((payload or {}).get("rows", []))
 
+
+
+
+
+
+
+    def paper_positions(self) -> pd.DataFrame:
+        payload = self._request("GET", "/v1/paper-positions")
+        return pd.DataFrame((payload or {}).get("rows", []))
+
+    def paper_break_even(self, trade_id: str) -> dict[str, Any]:
+        return dict(self._request(
+            "POST",
+            f"/v1/trades/{quote(str(trade_id), safe='')}/break-even",
+            json_body={},
+        ) or {})
+
+    def paper_manual_close(self, trade_id: str) -> dict[str, Any]:
+        return dict(self._request(
+            "POST",
+            f"/v1/trades/{quote(str(trade_id), safe='')}/manual-close",
+            json_body={},
+        ) or {})
+
+    def paper_management_events(self, *, limit: int = 100) -> pd.DataFrame:
+        payload = self._request(
+            "GET",
+            "/v1/paper-management-events",
+            params={"limit": int(limit)},
+        )
+        return pd.DataFrame((payload or {}).get("rows", []))
+
     def prop_account(self, *, trader_id: str | None = None) -> dict[str, Any]:
         params = {"trader_id": trader_id} if trader_id else {}
         return dict(self._request("GET", "/v1/prop-account", params=params) or {})

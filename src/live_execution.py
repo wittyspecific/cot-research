@@ -9,6 +9,8 @@ from typing import Any, Mapping
 
 import pandas as pd
 
+from .paper_position_management import process_paper_management_quotes
+
 from .mt5_account import MT5Config, read_bridge_quotes, write_bridge_quote_watch
 from .price_units import plan_to_mt5_units
 from .trade_journal import activate_simulation_trade_live, list_trade_plans
@@ -171,11 +173,20 @@ def live_execution_cycle(
         if activate_simulation_trade_live(trade_id, fill, db_path=db_path):
             activated += 1
 
+    management = process_paper_management_quotes(
+        quotes,
+        db_path=db_path,
+        max_tick_age_seconds=max_tick_age_seconds,
+        now=now,
+    )
+
     return {
         "watched_symbols": len(symbols),
         "planned": int(len(pending)),
         "activated": activated,
         "quote_rows": int(len(quotes)),
+        "managed_exits": int(management.get("closed", 0)),
+        "management_errors": list(management.get("errors", [])),
     }
 
 

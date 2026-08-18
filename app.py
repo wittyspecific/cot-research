@@ -184,6 +184,7 @@ with st.sidebar:
         st.rerun()
 
 # V3.10.0: divide-and-conquer positioning regime is the primary research workflow.
+# V3.15.0 · PAPER POSITION MANAGEMENT
 pages: dict[str, list] = {
     "WORKSPACE": [
         st.Page("pages/dashboard.py", title="Dashboard", icon=":material/home:", default=True),
@@ -195,6 +196,7 @@ pages: dict[str, list] = {
     ],
     "TRADING": [
         st.Page("pages/trade_planner.py", title="Neuer Trade", icon=":material/add_circle:"),
+        st.Page("pages/positionsmanagement.py", title="Positionsmanagement", icon=":material/tune:"),
         st.Page("pages/trading_journal.py", title="Journal", icon=":material/menu_book:"),
         st.Page("pages/prop_desk.py", title="Prop Desk", icon=":material/monitoring:"),
     ],

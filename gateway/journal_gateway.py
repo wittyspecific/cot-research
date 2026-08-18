@@ -25,6 +25,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.mt5_account import config_from_mapping as mt5_config_from_mapping, get_mt5_snapshot
+from src.mt5_account import read_bridge_quotes
+from src.paper_position_management import (
+    list_active_paper_positions,
+    list_paper_management_events,
+    manual_close_from_quotes,
+    records_json_safe,
+    set_break_even,
+)
 from src.live_execution import LiveExecutionWatcher
 from src.prop_desk import ensure_prop_account, prop_desk_ranking, prop_desk_state, realized_balance, update_prop_account
 from src.trade_journal import (
@@ -302,6 +310,34 @@ class GatewayHandler(BaseHTTPRequestHandler):
         path = parsed.path.rstrip("/") or "/"
         query = parse_qs(parsed.query)
         try:
+
+            if path == "/v1/paper-positions":
+                trader, _ = self._session_required()
+                if not trader:
+                    return
+                rows = list_active_paper_positions(
+                    trader_id=str(trader["trader_id"]),
+                    db_path=self.state.db_path,
+                )
+                self._send(200, {"rows": records_json_safe(rows)})
+                return
+
+            if path == "/v1/paper-management-events":
+                trader, _ = self._session_required()
+                if not trader:
+                    return
+                try:
+                    limit = int((query.get("limit") or [100])[0])
+                except (TypeError, ValueError):
+                    limit = 100
+                rows = list_paper_management_events(
+                    trader_id=str(trader["trader_id"]),
+                    limit=limit,
+                    db_path=self.state.db_path,
+                )
+                self._send(200, {"rows": records_json_safe(rows)})
+                return
+
             if path == "/v1/health":
                 payload = {"ok": True, "version": VERSION, "service": "COT Journal Gateway"}
                 watcher = getattr(self.state, "execution_watcher", None)
@@ -309,6 +345,9 @@ class GatewayHandler(BaseHTTPRequestHandler):
                     payload["execution_watcher"] = watcher.status()
                 self._send(200, payload)
                 return
+
+
+
             if path == "/v1/auth/me":
                 trader, _ = self._session_required()
                 if trader:
@@ -541,6 +580,43 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 event_id = append_trade_event(trade_id, event_type, payload or {}, source="USER", db_path=self.state.db_path)
                 self._send(201, {"event_id": event_id})
                 return
+
+
+
+            if len(parts) == 4 and parts[:2] == ["v1", "trades"] and parts[3] in {"break-even", "manual-close"}:
+                trade_id = parts[2]
+                trader, _ = self._session_required()
+                if not trader:
+                    return
+                if not self.state.authorize_trade(trader, trade_id):
+                    self._error(403, "Kein Zugriff auf diesen Trade.")
+                    return
+                actor_id = str(trader["trader_id"])
+                if parts[3] == "break-even":
+                    result = set_break_even(
+                        trade_id,
+                        actor_trader_id=actor_id,
+                        db_path=self.state.db_path,
+                    )
+                else:
+                    config = mt5_config_from_mapping(self.state.mt5_cfg)
+                    max_tick_age = float(
+                        self.state.execution_watcher_cfg.get("max_tick_age_seconds", 5.0) or 5.0
+                    )
+                    quotes = read_bridge_quotes(
+                        config,
+                        max_age_seconds=max(3, int(max_tick_age)),
+                    )
+                    result = manual_close_from_quotes(
+                        trade_id,
+                        actor_trader_id=actor_id,
+                        quotes=quotes,
+                        db_path=self.state.db_path,
+                        max_tick_age_seconds=max_tick_age,
+                    )
+                self._send(200, result)
+                return
+
             if len(parts) == 4 and parts[:2] == ["v1", "trades"] and parts[3] == "void":
                 trade_id = parts[2]
                 trader, _ = self._session_required()
