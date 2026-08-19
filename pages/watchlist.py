@@ -1,4 +1,7 @@
 from __future__ import annotations
+# V3.15.2 · FULL ALIGNMENT FILTER
+# V3.15.2 compatibility: ["Alle", "Fresh Micro", "Aligned", "Watch", "Context Ready"]
+# V3.15.1 · SIMPLE MICRO LABELS
 # V3.14.9 · SEASONALITY HELPER HOTFIX
 # V3.14.9 · UI TEST COMPAT HOTFIX
 # V3.14.9 · NATIVE MARKET ROUTING + CLEAN NAV
@@ -536,6 +539,43 @@ def _ensure_fresh_micro_rows(
     if appended:
         base = pd.concat([base, pd.DataFrame(appended)], ignore_index=True, sort=False)
     return base.reset_index(drop=True)
+
+def _full_alignment_state(row: pd.Series) -> dict:
+    """Makro + Mikro + 20J-Seasonality point in the same direction."""
+    decision = classify_macro_micro_trade(row)
+    macro = dict(decision.get("macro") or {})
+    micro = dict(decision.get("micro") or {})
+
+    macro_direction = int(macro.get("direction", 0) or 0)
+    micro_direction = int(micro.get("direction", 0) or 0)
+
+    if macro_direction == 0 or micro_direction != macro_direction:
+        return {
+            "aligned": False,
+            "direction": 0,
+            "season_overall": "N/V",
+        }
+
+    ticker = str(row.get("ticker", "") or "").strip()
+    if not ticker:
+        return {
+            "aligned": False,
+            "direction": 0,
+            "season_overall": "N/V",
+        }
+
+    season = calculate_market_20y_multi_seasonality(
+        ticker=ticker,
+        cot_direction=macro_direction,
+    )
+    overall = str(season.get("overall", "N/V") or "N/V").upper()
+    season_supports = "UNTERSTÜTZT" in overall
+
+    return {
+        "aligned": bool(season_supports),
+        "direction": macro_direction if season_supports else 0,
+        "season_overall": overall,
+    }
 
 def _apply_macro_micro_filters(
     frame: pd.DataFrame,
@@ -1486,8 +1526,8 @@ def _render_trader_table(df: pd.DataFrame):
         .macro-bull{background:#ecfdf3;color:#15803d;border:1px solid #d7f2df}
         .macro-bear{background:#fff1f2;color:#dc2626;border:1px solid #ffe0e3}
         .macro-neutral{background:#f2f4f7;color:#667085;border:1px solid #e4e7ec}
-        .micro-bull{background:#eef2ff;color:#4f46e5;border:1px solid #dfe3ff}
-        .micro-bear{background:#f5f0ff;color:#7c3aed;border:1px solid #e9ddff}
+        .micro-bull{background:#ecfdf3;color:#15803d;border:1px solid #d7f2df}
+        .micro-bear{background:#fff1f2;color:#dc2626;border:1px solid #ffe0e3}
         .micro-neutral{background:#f2f4f7;color:#667085;border:1px solid #e4e7ec}
         .wl9-age, .sl-age{
             font-size:8px;color:#98a2b3;margin-top:4px;
@@ -1546,6 +1586,14 @@ def _render_trader_table(df: pd.DataFrame):
         macro = dict(decision.get("macro") or {})
         micro = dict(decision.get("micro") or {})
         bias_direction = int(decision.get("bias_direction", 0) or 0)
+
+        micro_display_label = (
+            "Bullish"
+            if int(micro.get("direction", 0) or 0) > 0
+            else "Bearish"
+            if int(micro.get("direction", 0) or 0) < 0
+            else "—"
+        )
 
         macro_direction = int(macro.get("direction", 0) or 0)
         micro_direction = int(micro.get("direction", 0) or 0)
@@ -1671,7 +1719,7 @@ def _render_trader_table(df: pd.DataFrame):
             st.markdown(
                 '<div class="wl9-stack">'
                 f'<span class="wl9-chip {micro_cls}">'
-                f'{escape(str(micro.get("label", "—") or "—"))}'
+                f'{escape(micro_display_label)}'
                 "</span>"
                 f"{micro_age_html}"
                 "</div>",
@@ -1799,7 +1847,7 @@ else:
 
     view = st.radio(
         "Ansicht",
-        ["Alle", "Fresh Micro", "Aligned", "Watch", "Context Ready"],
+        ["Alle", "Fresh Micro", "Aligned", "Alles aligned", "Watch", "Context Ready"],
         horizontal=True,
         label_visibility="collapsed",
         key="watchlist_primary_view",
@@ -1899,6 +1947,12 @@ else:
                 )
         else:
             filtered = filtered.iloc[0:0]
+    elif view == "Alles aligned":
+        keep = []
+        for _, filter_row in filtered.iterrows():
+            full_alignment = _full_alignment_state(filter_row)
+            keep.append(bool(full_alignment["aligned"]))
+        filtered = filtered[pd.Series(keep, index=filtered.index)]
     elif view in {"Aligned", "Watch"}:
         keep = []
         for _, filter_row in filtered.iterrows():
