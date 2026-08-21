@@ -1,4 +1,6 @@
 from __future__ import annotations
+# V3.22.7 · COT × SEASONALITY LAB
+# V3.22.6 · SEASONALITY EDGE LAB
 # V3.22.0 · MARKET REGIME + VOLATILITY + CREDIT RESEARCH
 # V3.21.4 · PRODUCT BRAND · QUANT RESEARCH
 # V3.20.0 · TRADER IP SHIELD
@@ -208,6 +210,8 @@ pages: dict[str, list] = {
         st.Page("pages/market_regime.py", title="Market Regime", icon=":material/public:"),
         st.Page("pages/volatility_regime.py", title="Volatility Regime", icon=":material/show_chart:"),
         st.Page("pages/credit_stress.py", title="Credit Stress", icon=":material/account_balance:"),
+        st.Page("pages/seasonality_edge_lab.py", title="Seasonality Edge Lab", icon=":material/calendar_month:"),
+        st.Page("pages/cot_x_seasonality.py", title="COT × Seasonality", icon=":material/join_inner:"),
     ],
     "TRADING": [
         st.Page("pages/trade_planner.py", title="Neuer Trade", icon=":material/add_circle:"),
