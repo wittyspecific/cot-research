@@ -1,4 +1,5 @@
 from __future__ import annotations
+# V3.22.0 · MARKET REGIME + VOLATILITY + CREDIT RESEARCH
 # V3.21.4 · PRODUCT BRAND · QUANT RESEARCH
 # V3.20.0 · TRADER IP SHIELD
 # ADVANCED bleibt vor dem Navigation-Render für Nicht-Admins entfernt.
@@ -204,6 +205,9 @@ pages: dict[str, list] = {
         st.Page("pages/marktanalyse.py", title="Marktanalyse", icon=":material/query_stats:"),
         st.Page("pages/forex_matrix.py", title="Währungsstärke", icon=":material/currency_exchange:"),
         st.Page("pages/yield_spreads.py", title="Yield Spreads", icon=":material/show_chart:"),
+        st.Page("pages/market_regime.py", title="Market Regime", icon=":material/public:"),
+        st.Page("pages/volatility_regime.py", title="Volatility Regime", icon=":material/show_chart:"),
+        st.Page("pages/credit_stress.py", title="Credit Stress", icon=":material/account_balance:"),
     ],
     "TRADING": [
         st.Page("pages/trade_planner.py", title="Neuer Trade", icon=":material/add_circle:"),

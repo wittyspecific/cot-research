@@ -1,4 +1,18 @@
 from __future__ import annotations
+# V3.22.5 · WATCHLIST SIGNAL AGE FILTER
+# V3.22.5 filter only · NOT DECISION CORE
+# Signalalter consumes existing Micro/Macro age outputs only.
+# V3.22.4 · WATCHLIST CLEAN FILTERS
+# V3.22.4 legacy source only · NOT RENDERED
+# key="watchlist_primary_view"
+# Alle · Early Alignment · Alles aligned · Pullback · Watch
+# V3.22.3 · WATCHLIST FILTER CLEANUP
+# V3.22.3 legacy quick-view source contracts · NOT RENDERED
+# ["Alle", "Fresh Micro", "Aligned", "Alles aligned", "Watch", "Context Ready"]
+# V3.22.2 · WATCHLIST PHASE FILTER
+# V3.22.2 presentation/filter only · NOT DECISION CORE
+# Pullback / Confirmed / Alignment are UI filter groups only.
+# V3.22.1 · WATCHLIST SETUP PHASES
 # V3.20.0 · WATCHLIST TRADER OUTPUT ONLY
 # Legacy source-contract only: ## Feste Methodik
 # Legacy source-contract only: Qualifikation = aktiver EXTREME-/RELEASE-Zyklus
@@ -1457,6 +1471,221 @@ def _open_watchlist_market(row: pd.Series) -> None:
     st.session_state["_market_context_handoff"] = handoff
     st.switch_page("pages/marktanalyse.py")
 
+def _watchlist_setup_phase(row: pd.Series, decision: dict | None = None) -> dict:
+    """Presentation-only phase label from existing Macro/Micro outputs."""
+    decision = dict(decision or classify_macro_micro_trade(row) or {})
+    macro = dict(decision.get("macro") or {})
+    micro = dict(decision.get("micro") or {})
+
+    phase = str(macro.get("phase", "NEUTRAL") or "NEUTRAL").upper()
+    macro_direction = int(macro.get("direction", 0) or 0)
+    micro_direction = int(micro.get("direction", 0) or 0)
+    micro_fresh = bool(micro.get("fresh", False))
+    micro_trade_direction = micro_direction if micro_fresh and micro_direction else 0
+
+    try:
+        macro_age = int(float(row.get("macro_status_age_weeks", 0) or 0))
+    except (TypeError, ValueError):
+        macro_age = 0
+
+    fresh_transition = phase == "TRANSITION" and 1 <= macro_age <= 2
+
+    if phase == "EXTREME":
+        if macro_direction and micro_trade_direction == macro_direction:
+            return {"key": "TIMING_WARNING", "label": "TIMING WARNING", "tone": "watch",
+                    "detail": "Mikro bestätigt die erwartete Richtung, Makro ist aber noch im Extrem."}
+        if macro_direction and micro_trade_direction == -macro_direction:
+            return {"key": "COUNTER_TIMING", "label": "COUNTER-TIMING", "tone": "conflict",
+                    "detail": "Frisches Mikro läuft gegen die erwartete Makro-Richtung."}
+        return {"key": "EXTREME_WATCH", "label": "EXTREME WATCH", "tone": "neutral",
+                "detail": "Makro-Extrem beobachten; Timing fehlt noch."}
+
+    if phase == "TRANSITION":
+        if fresh_transition and macro_direction and micro_trade_direction == macro_direction:
+            return {"key": "EARLY_ALIGNMENT", "label": "EARLY ALIGNMENT", "tone": "early",
+                    "detail": "Frischer Makro-Übergang und frisches Mikro-Timing zeigen gemeinsam."}
+        if macro_direction and micro_trade_direction == macro_direction:
+            return {"key": "TRANSITION_MICRO", "label": "TRANSITION + MICRO", "tone": "watch",
+                    "detail": "Transition und Mikro zeigen gemeinsam; der Übergang ist nicht mehr ganz frisch."}
+        if macro_direction and micro_trade_direction == -macro_direction:
+            return {"key": "TIMING_CONFLICT", "label": "TIMING CONFLICT", "tone": "conflict",
+                    "detail": "Makro-Übergang vorhanden, Mikro-Timing läuft dagegen."}
+        return {"key": "TRANSITION_WAIT", "label": "TRANSITION · WAIT", "tone": "neutral",
+                "detail": "Makro-Übergang vorhanden; frisches Mikro fehlt."}
+
+    if phase == "RELEASE":
+        if macro_direction and micro_trade_direction == macro_direction:
+            return {"key": "STRUCTURAL_ALIGNMENT", "label": "STRUCTURAL ALIGNMENT", "tone": "aligned",
+                    "detail": "Aktiver Makro-Release und Mikro sind aligned."}
+        if macro_direction and micro_trade_direction == -macro_direction:
+            return {"key": "MICRO_PULLBACK", "label": "MICRO PULLBACK", "tone": "conflict",
+                    "detail": "Makro-Release bleibt führend; Mikro zeigt eine Gegenbewegung."}
+        return {"key": "MACRO_LEADS", "label": "RELEASE · MACRO LEADS", "tone": "watch",
+                "detail": "Aktiver Makro-Release; frisches Mikro fehlt."}
+
+    if phase == "CONFIRMED":
+        if macro_direction and micro_trade_direction == macro_direction:
+            return {"key": "CONFIRMED_ALIGNMENT", "label": "CONFIRMED ALIGNMENT", "tone": "aligned",
+                    "detail": "Bestätigtes Makro-Regime und Mikro sind aligned."}
+        if macro_direction and micro_trade_direction == -macro_direction:
+            return {"key": "CONFIRMED_PULLBACK", "label": "CONFIRMED · PULLBACK", "tone": "conflict",
+                    "detail": "Bestätigtes Makro-Regime bleibt führend; Mikro läuft dagegen."}
+        return {"key": "CONFIRMED_MACRO", "label": "CONFIRMED · MACRO", "tone": "aligned",
+                "detail": "Bestätigtes Makro-Regime ohne frisches Mikro."}
+
+    return {"key": "WAIT", "label": "WAIT", "tone": "neutral",
+            "detail": "Kein aktiver Makro-/Mikro-Phasenkontext."}
+
+def _watchlist_phase_filter_groups(
+    row: pd.Series,
+    decision: dict | None = None,
+) -> set[str]:
+    """Filter groups derived only from the existing V3.22.1 phase label."""
+    decision = dict(decision or classify_macro_micro_trade(row) or {})
+    setup_phase = _watchlist_setup_phase(row, decision)
+
+    key = str(setup_phase.get("key", "WAIT") or "WAIT").upper()
+    macro = dict(decision.get("macro") or {})
+    macro_phase = str(macro.get("phase", "NEUTRAL") or "NEUTRAL").upper()
+
+    groups: set[str] = set()
+
+    if key == "EARLY_ALIGNMENT":
+        groups.add("EARLY ALIGNMENT")
+
+    if key in {
+        "EARLY_ALIGNMENT",
+        "STRUCTURAL_ALIGNMENT",
+        "CONFIRMED_ALIGNMENT",
+    }:
+        groups.add("ALIGNMENT")
+
+    if key in {
+        "MICRO_PULLBACK",
+        "CONFIRMED_PULLBACK",
+    }:
+        groups.add("PULLBACK")
+
+    if macro_phase == "CONFIRMED":
+        groups.add("CONFIRMED")
+
+    if macro_phase == "TRANSITION":
+        groups.add("TRANSITION")
+
+    if key in {
+        "EXTREME_WATCH",
+        "TIMING_WARNING",
+        "TRANSITION_WAIT",
+        "TRANSITION_MICRO",
+        "MACRO_LEADS",
+    }:
+        groups.add("WATCH")
+
+    if key in {
+        "COUNTER_TIMING",
+        "TIMING_CONFLICT",
+        "MICRO_PULLBACK",
+        "CONFIRMED_PULLBACK",
+    }:
+        groups.add("CONFLICT")
+
+    return groups
+
+
+def _watchlist_phase_filter_match(
+    row: pd.Series,
+    selections: list[str] | tuple[str, ...] | set[str],
+) -> bool:
+    """Multiple selected filter groups are OR-combined."""
+    selected = {
+        str(value).upper().strip()
+        for value in (selections or [])
+        if str(value).strip()
+    }
+    if not selected:
+        return True
+
+    groups = _watchlist_phase_filter_groups(row)
+    return bool(selected.intersection(groups))
+
+def _watchlist_setup_signal_age_weeks(
+    row: pd.Series,
+    decision: dict | None = None,
+) -> int:
+    """Use existing Micro trigger age for Micro-driven phases, else Macro age."""
+    decision = dict(decision or classify_macro_micro_trade(row) or {})
+    setup_phase = _watchlist_setup_phase(row, decision)
+    key = str(setup_phase.get("key", "WAIT") or "WAIT").upper()
+    micro = dict(decision.get("micro") or {})
+
+    try:
+        micro_age = int(micro.get("age_weeks", -1))
+    except (TypeError, ValueError):
+        micro_age = -1
+
+    try:
+        macro_age = int(float(row.get("macro_status_age_weeks", -1)))
+    except (TypeError, ValueError):
+        macro_age = -1
+
+    micro_driven = {
+        "TIMING_WARNING",
+        "COUNTER_TIMING",
+        "EARLY_ALIGNMENT",
+        "TRANSITION_MICRO",
+        "TIMING_CONFLICT",
+        "STRUCTURAL_ALIGNMENT",
+        "MICRO_PULLBACK",
+        "CONFIRMED_ALIGNMENT",
+        "CONFIRMED_PULLBACK",
+    }
+
+    if key in micro_driven and micro_age >= 0:
+        return micro_age
+
+    if macro_age >= 0:
+        return macro_age
+
+    return -1
+
+
+def _watchlist_setup_signal_age_bucket(
+    row: pd.Series,
+    decision: dict | None = None,
+) -> str:
+    age = _watchlist_setup_signal_age_weeks(
+        row,
+        decision,
+    )
+
+    if age < 0:
+        return "N/V"
+    if age == 0:
+        return "Diese Woche"
+    if age == 1:
+        return "1W"
+    if age == 2:
+        return "2W"
+    if age == 3:
+        return "3W"
+    return "4W+"
+
+
+def _watchlist_signal_age_filter_match(
+    row: pd.Series,
+    selections,
+) -> bool:
+    selected = {
+        str(value).strip()
+        for value in (selections or [])
+        if str(value).strip()
+    }
+
+    if not selected:
+        return True
+
+    return _watchlist_setup_signal_age_bucket(row) in selected
+
 def _render_trader_table(df: pd.DataFrame):
     """V3.14.9 · native clickable trader watchlist without URL reloads."""
     if df is None or df.empty:
@@ -1549,6 +1778,16 @@ def _render_trader_table(df: pd.DataFrame):
         .bias-long{background:#16a34a}
         .bias-short{background:#dc2626}
         .bias-neutral{background:#98a2b3}
+        .wl9-phase{
+            display:inline-flex;align-items:center;padding:4px 7px;
+            border-radius:6px;font-size:8px;font-weight:850;
+            letter-spacing:.025em;white-space:nowrap;margin-bottom:4px;
+        }
+        .phase-early{background:#eef2ff;color:#4338ca;border:1px solid #dfe3ff}
+        .phase-aligned{background:#ecfdf3;color:#15803d;border:1px solid #d7f2df}
+        .phase-watch{background:#fffaeb;color:#b54708;border:1px solid #fef0c7}
+        .phase-conflict{background:#fff1f2;color:#dc2626;border:1px solid #ffe0e3}
+        .phase-neutral{background:#f2f4f7;color:#667085;border:1px solid #e4e7ec}
         .wl9-plan{
             font-size:10px;font-weight:650;color:#344054;line-height:1.25;
         }
@@ -1572,7 +1811,7 @@ def _render_trader_table(df: pd.DataFrame):
     )
 
     widths = [2.15, 1.55, 1.55, 1.35, 0.72, 1.85, 0.95]
-    headers = ["Markt", "Makro", "Mikro", "Bias", "Season", "Plan", "Signal"]
+    headers = ["Markt", "Makro", "Mikro", "Bias", "Season", "Phase / Plan", "Signal"]
 
     head = st.columns(widths, gap="small")
     for col, label in zip(head, headers):
@@ -1589,6 +1828,10 @@ def _render_trader_table(df: pd.DataFrame):
         macro = dict(decision.get("macro") or {})
         micro = dict(decision.get("micro") or {})
         bias_direction = int(decision.get("bias_direction", 0) or 0)
+        setup_phase = _watchlist_setup_phase(row, decision)
+        phase_label = str(setup_phase.get("label", "WAIT") or "WAIT")
+        phase_tone = str(setup_phase.get("tone", "neutral") or "neutral")
+        phase_detail = str(setup_phase.get("detail", "") or "")
 
         micro_display_label = (
             "Bullish"
@@ -1750,7 +1993,10 @@ def _render_trader_table(df: pd.DataFrame):
 
         with c6:
             st.markdown(
-                '<div class="wl9-cell">'
+                '<div class="wl9-stack">'
+                f'<span class="wl9-phase phase-{escape(phase_tone)}" '
+                f'title="{escape(phase_detail)}">'
+                f'{escape(phase_label)}</span>'
                 f'<div class="wl9-plan">'
                 f'{escape(str(decision.get("plan", "Warten") or "Warten"))}'
                 "</div></div>",
@@ -1848,13 +2094,7 @@ if pipeline.empty:
     empty_state("Keine aktiven Positionierungszyklen", "Aktuell steht kein Markt in einer 156W-Extrem- oder aktiven Release-Phase.")
 else:
 
-    view = st.radio(
-        "Ansicht",
-        ["Alle", "Fresh Micro", "Aligned", "Alles aligned", "Watch", "Context Ready"],
-        horizontal=True,
-        label_visibility="collapsed",
-        key="watchlist_primary_view",
-    )
+    view = "Alle"  # V3.22.4: quick-radio removed
 
     _asset_order = [
         "Currencies",
@@ -1883,8 +2123,8 @@ else:
         if asset in _available_assets
     ]
 
-    f_asset, f_dir, f_macro, f_micro = st.columns(
-        [1.15, 1.05, 1.0, 1.15],
+    f_asset, f_dir, f_phase, f_age = st.columns(
+        [1.0, 0.9, 1.25, 0.9],
         gap="small",
     )
 
@@ -1911,36 +2151,106 @@ else:
             key="watchlist_direction_filter",
         )
 
-    with f_macro:
-        macro_filter = st.selectbox(
-            "Makro-Phase",
+    with f_phase:
+        phase_filter = st.multiselect(
+            "Setup-Phase",
             [
-                "Alle Makro",
-                "EXTREME",
-                "TRANSITION",
-                "RELEASE",
+                "EARLY ALIGNMENT",
+                "ALIGNMENT",
+                "PULLBACK",
                 "CONFIRMED",
+                "TRANSITION",
+                "WATCH",
+                "CONFLICT",
             ],
-            key="watchlist_macro_phase_filter",
+            default=[],
+            key="watchlist_setup_phase_filter",
+            placeholder="Alle Phasen",
+            help=(
+                "Optionaler Ergebnisfilter. Mehrfachauswahl wird als ODER "
+                "angewendet und verändert keine COT-/Signal-Logik."
+            ),
+        )
+    with f_age:
+        signal_age_filter = st.multiselect(
+            "Signalalter",
+            ["Diese Woche", "1W", "2W", "3W", "4W+"],
+            default=[],
+            key="watchlist_signal_age_filter",
+            placeholder="Alle",
+            help=(
+                "Bei Micro-getriebenen Setup-Phasen zählt das Alter des "
+                "Micro-Triggers; sonst das Alter der aktuellen Makro-Phase."
+            ),
         )
 
-    with f_micro:
-        micro_filter = st.selectbox(
-            "Mikro-Trigger",
-            [
-                "Alle Mikro",
-                "FRESH BULLISH",
-                "FRESH BEARISH",
-                "BULLISH TRIGGER",
-                "BEARISH TRIGGER",
-                "KEIN TRIGGER",
-            ],
-            key="watchlist_micro_trigger_filter",
+
+    only_all_aligned = st.checkbox(
+        "Nur alles aligned",
+        value=False,
+        key="watchlist_only_all_aligned",
+        help=(
+            "Zeigt nur Märkte, bei denen Makro, Mikro und Seasonality "
+            "in dieselbe Richtung zeigen."
+        ),
+    )
+
+    with st.expander("Weitere Filter", expanded=False):
+        f_macro, f_micro = st.columns(
+            2,
+            gap="small",
         )
+
+        with f_macro:
+            macro_filter = st.selectbox(
+                "Makro-Phase",
+                [
+                    "Alle Makro",
+                    "EXTREME",
+                    "TRANSITION",
+                    "RELEASE",
+                    "CONFIRMED",
+                ],
+                key="watchlist_macro_phase_filter",
+            )
+
+        with f_micro:
+            micro_filter = st.selectbox(
+                "Mikro-Trigger",
+                [
+                    "Alle Mikro",
+                    "FRESH BULLISH",
+                    "FRESH BEARISH",
+                    "BULLISH TRIGGER",
+                    "BEARISH TRIGGER",
+                    "KEIN TRIGGER",
+                ],
+                key="watchlist_micro_trigger_filter",
+            )
 
     filtered = pipeline.copy()
 
-    if view == "Fresh Micro":
+    if view == "Early Alignment":
+        keep = []
+        for _, filter_row in filtered.iterrows():
+            keep.append(
+                _watchlist_phase_filter_match(
+                    filter_row,
+                    ["EARLY ALIGNMENT"],
+                )
+            )
+        filtered = filtered[pd.Series(keep, index=filtered.index)]
+    elif view == "Pullback":
+        keep = []
+        for _, filter_row in filtered.iterrows():
+            keep.append(
+                _watchlist_phase_filter_match(
+                    filter_row,
+                    ["PULLBACK"],
+                )
+            )
+        filtered = filtered[pd.Series(keep, index=filtered.index)]
+    elif view == "Fresh Micro":
         if "micro_trigger_fresh" in filtered.columns:
             filtered = filtered[filtered["micro_trigger_fresh"].fillna(False)]
             if "micro_trigger_age_weeks" in filtered.columns:
@@ -1981,6 +2291,16 @@ else:
         filtered = filtered[pd.to_numeric(filtered["expected_direction"], errors="coerce") > 0]
     elif direction_filter == "Bearish Reversal":
         filtered = filtered[pd.to_numeric(filtered["expected_direction"], errors="coerce") < 0]
+
+    if phase_filter and not filtered.empty:
+        _phase_mask = filtered.apply(
+            lambda row: _watchlist_phase_filter_match(
+                row,
+                phase_filter,
+            ),
+            axis=1,
+        )
+        filtered = filtered.loc[_phase_mask].copy()
 
     trader_view = filtered.reset_index(drop=True)
     _micro_health = _micro_runtime_health(pipeline)
@@ -2034,6 +2354,25 @@ Preisstruktur und Saisonalität werden erst spät ergänzt. **CONTEXT READY ist 
 
 Der **26W-COT-Index bleibt erhalten**, ist aber aus der operativen Watchlist entfernt. Er bleibt im Advanced Research und in historischen Snapshots für spätere ML-/Out-of-Sample-Vergleiche verfügbar.
 """)
+if signal_age_filter and not filtered.empty:
+    _age_mask = filtered.apply(
+        lambda row: _watchlist_signal_age_filter_match(
+            row,
+            signal_age_filter,
+        ),
+        axis=1,
+    )
+    filtered = filtered.loc[_age_mask].copy()
+
+if only_all_aligned and not filtered.empty:
+    _aligned_mask = filtered.apply(
+        lambda row: bool(
+            _full_alignment_state(row).get("aligned", False)
+        ),
+        axis=1,
+    )
+    filtered = filtered.loc[_aligned_mask].copy()
+
 
 if not scan["errors"].empty:
     with st.expander(f"Datenprobleme · {len(scan['errors'])} Märkte", expanded=False):
