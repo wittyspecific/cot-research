@@ -27,6 +27,7 @@ from .fx_relative_core import (
     currency_cot_profile,
 )
 from .markets import CLASSIC_MARKETS
+from .micro_trigger import latest_micro_trigger
 from .seasonality import forward_statistics
 from .watchlist_seasonality_core import classify_asset_seasonality
 
@@ -73,6 +74,10 @@ def load_currency_cot_profiles() -> tuple[pd.DataFrame, pd.DataFrame]:
                 upper=NET_UPPER_PERCENTILE,
                 lower=NET_LOWER_PERCENTILE,
             )
+            # V3.17.0 · FUNDAMENTAL FX PROFILE FIELDS
+            fundamental_micro_trigger = latest_micro_trigger(
+                cot, upper=90.0, lower=10.0, fresh_weeks=2
+            )
             profile = currency_cot_profile(
                 symbol=market["symbol"],
                 market_name=market["name"],
@@ -97,6 +102,18 @@ def load_currency_cot_profiles() -> tuple[pd.DataFrame, pd.DataFrame]:
                 index_lower=INDEX_LOWER,
                 net_upper=NET_UPPER_PERCENTILE,
                 net_lower=NET_LOWER_PERCENTILE,
+            )
+            profile.update(
+                {
+                    "micro_trigger_direction": int(fundamental_micro_trigger.get("direction", 0) or 0),
+                    "micro_trigger_label": str(fundamental_micro_trigger.get("label", "—") or "—"),
+                    "micro_trigger_age_weeks": int(fundamental_micro_trigger.get("age_weeks", -1)),
+                    "micro_trigger_fresh": bool(fundamental_micro_trigger.get("fresh", False)),
+                    "micro_trigger_report_date": fundamental_micro_trigger.get("trigger_report_date", pd.NaT),
+                    "cot_cycle_entry_date": cycle.get("entry_date"),
+                    "cot_release_date": cycle.get("release_date"),
+                    "cot_weeks_since_release": cycle.get("weeks_since_release", np.nan),
+                }
             )
             profile["cftc_code"] = code
             rows.append(profile)

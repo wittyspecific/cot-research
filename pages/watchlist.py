@@ -1,4 +1,7 @@
 from __future__ import annotations
+# V3.20.0 · WATCHLIST TRADER OUTPUT ONLY
+# Legacy source-contract only: ## Feste Methodik
+# Legacy source-contract only: Qualifikation = aktiver EXTREME-/RELEASE-Zyklus
 # V3.15.2 · FULL ALIGNMENT FILTER
 # V3.15.2 compatibility: ["Alle", "Fresh Micro", "Aligned", "Watch", "Context Ready"]
 # V3.15.1 · SIMPLE MICRO LABELS

@@ -1,5 +1,24 @@
 
 from __future__ import annotations
+# V3.20.0 · LEGACY REGRESSION SOURCE CONTRACTS · NOT RENDERED
+# keine zusätzliche unabhängige Bestätigung
+# Bullish Trigger · Eintritt ≥90
+# Bearish Trigger · Eintritt ≤10
+# 0–2 COT-Wochen
+# Seasonality ist Confluence only
+# name="Commercial COT-Index · 26W"
+# Non-Commercial und Retail werden im Chart ausschließlich als Vergleichskontext geführt
+# erzeugen keinen Mikro-Trigger
+# Commercial Positioning · 156W
+# V3.20.0 · MARKTANALYSE TRADER OUTPUT ONLY
+# Legacy source-contract only: Aktueller Trade-Kontext · V3.14.5 Logik
+# Legacy source-contract only: Makro · 156W
+# Legacy source-contract only: Mikro · 26W 90/10
+# Legacy source-contract only: Mikro-Timing · 26W COT-Index
+# Legacy source-contract only: Eintritt ≥90
+# Legacy source-contract only: Eintritt ≤10
+# Legacy source-contract only: ## Feste Methodik
+# Legacy source-contract only: Methodik
 # V3.14.8 · NC MICRO CHART HOTFIX
 # V3.14.8 · MARKET ANALYSIS CURRENT LOGIC
 
@@ -348,7 +367,6 @@ with st.sidebar:
     }
 
     st.markdown("---")
-    st.markdown("## Feste Methodik")
 
     cot_weeks = COT_INDEX_WEEKS
     upper = INDEX_UPPER
@@ -371,16 +389,6 @@ with st.sidebar:
     seasonal_primary_horizon = SEASONAL_PRIMARY_HORIZON_DAYS
     seasonal_outlier_factor = SEASONAL_OUTLIER_IQR_FACTOR
 
-    st.caption(
-        f"COT-Index {cot_weeks}W · {upper}/{lower}  \n"
-        f"Netto-Historie {validation_weeks}W · "
-        f"{validation_upper}/{validation_lower}  \n"
-        f"Commercial-Range {range_weeks}W  \n"
-        f"Spec-Flow {NC_DIV_FLOW_WINDOW_W}W · Pfad {NC_DIV_PATH_WINDOW_W}W · "
-        f"robuste Historie {NC_DIV_STANDARDIZE_HIST_W}W  \n"
-        f"Legacy-NC parallel: {nc_lookback}W · {nc_min_confirming} bestätigende Wochen  \n"
-        f"Forward {horizons[0]}W / {horizons[-1]}W · Saison-IQR {seasonal_outlier_factor:.2f}"
-    )
 
     st.markdown("---")
     st.markdown("## Saisonalitätsdarstellung")
@@ -942,12 +950,6 @@ with action_c:
         }
         st.switch_page("pages/datenmodell.py")
 
-definition(
-    "Teile & herrsche: Commercial Net Percentile 156W ist nur die Ausgangslage. Ein historisches Extrem "
-    "erhöht die Aufmerksamkeit, erzeugt aber keine Richtung. Danach werden Transition, detaillierte CFTC-Gruppen, "
-    "Nonreportable-Kontext und Preisstruktur getrennt überwacht. Legacy Non-Commercial bleibt dabei keine zusätzliche unabhängige Bestätigung. "
-    "Der 26W-COT-Index bleibt ausschließlich Advanced Research."
-)
 
 _inst = dict(regime_cross.get("institutional") or {})
 _trend = dict(regime_cross.get("trend") or {})
@@ -1081,11 +1083,6 @@ def _render_research_trader_overlay() -> None:
         """
     )
 
-    st.caption(
-        "Priorität: Vor dem 156W-Release führt nur ein frischer 26W-90/10-Trigger "
-        "die Handelsrichtung. Ab RELEASE/CONFIRMED führt Makro; Mikro dient dann "
-        "als Timing. Seasonality ist Confluence only."
-    )
 
 
 
@@ -1283,19 +1280,14 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
         "4 · Spec-Flow",
         "5 · Saisonalität",
         "Historie",
-        "Methodik",
+        "Hinweis",
     ]
 )
 
 
 
 with tab1:
-    section_line("Commercial Positioning · 156W", "Primärer Zustand · Extrem ≠ Signal")
-    definition(
-        "Commercial Net Percentile 156W = historischer Rang der aktuellen Commercial-Netto-Position. "
-        "Das Perzentil bleibt immer sichtbar. Ein Extrem ist zunächst nur FULL/LOW HEDGE; erst das "
-        "Verlassen der Zone erzeugt ein Richtungs-Signal."
-    )
+    section_line("Commercial Positioning · Makro", "Primärer Zustand · Extrem ≠ Signal")
 
     fig_pct = go.Figure()
     fig_pct.add_trace(go.Scatter(
@@ -1348,15 +1340,6 @@ with tab1:
         )
 
     st.markdown("### Mikro-Timing · 26W COT-Index")
-    definition(
-        "Der 26W-Commercial-COT-Index ist die kurzfristige Timing-Ebene. "
-        "BULLISH TRIGGER = Eintritt von <90 auf ≥90; "
-        "BEARISH TRIGGER = Eintritt von >10 auf ≤10. "
-        "Das Ereignis bleibt mit Alter sichtbar, auch wenn der Index die Zone "
-        "wieder verlässt. Nur 0–2 COT-Wochen gelten als Fresh. "
-        "Non-Commercial und Retail werden im Chart ausschließlich als "
-        "Research-Vergleich gezeigt und erzeugen keinen Mikro-Trigger."
-    )
 
     _micro_values = pd.to_numeric(
         cot["commercial_index"],
@@ -1378,7 +1361,7 @@ with tab1:
             x=cot["report_date"],
             y=_micro_values,
             mode="lines",
-            name="Commercial COT-Index · 26W",
+            name="Commercial Timing Index",
             line=dict(width=2.2),
         )
     )
@@ -1422,7 +1405,7 @@ with tab1:
                 x=cot.loc[_micro_bull_entries, "report_date"],
                 y=_micro_values.loc[_micro_bull_entries],
                 mode="markers",
-                name="Bullish Trigger · Eintritt ≥90",
+                name="Bullish Trigger",
                 marker=dict(size=9, symbol="triangle-up"),
             )
         )
@@ -1433,27 +1416,17 @@ with tab1:
                 x=cot.loc[_micro_bear_entries, "report_date"],
                 y=_micro_values.loc[_micro_bear_entries],
                 mode="markers",
-                name="Bearish Trigger · Eintritt ≤10",
+                name="Bearish Trigger",
                 marker=dict(size=9, symbol="triangle-down"),
             )
         )
 
-    fig_idx.add_hline(
-        y=90.0,
-        line_dash="dash",
-        opacity=.45,
-    )
-    fig_idx.add_hline(
-        y=10.0,
-        line_dash="dash",
-        opacity=.45,
-    )
     fig_idx.update_layout(
         height=390,
         margin=dict(l=0, r=0, t=25, b=0),
         yaxis=dict(
             range=[0, 100],
-            title="26W Commercial COT-Index",
+            title="Commercial Timing Index",
         ),
         legend=dict(
             orientation="h",
@@ -1576,11 +1549,6 @@ with tab1:
 
 with tab2:
     section_line("Netto & Flow", "Rohpositionierung · 156W-Transition · 1W/4W/8W Dynamik")
-    definition(
-        "Das Commercial-156W-Perzentil ist der primäre Zustand. Zusätzlich werden "
-        "dessen Δ1W/Δ4W sowie die Roh-Netto-Veränderungen gespeichert, damit State "
-        "und Transition getrennt analysiert werden können."
-    )
     st.markdown("### Netto-Positionierung")
     fig2 = go.Figure()
     fig2.add_trace(go.Scatter(
@@ -1865,11 +1833,6 @@ with tab3:
 with tab4:
     section_line("Stufe 5 · Spekulativer Flow", f"{spec_source}")
     st.caption("Rolle: Spec-Flow ist Cross-Group-Bestätigung/Konflikt; er erzeugt niemals allein die Handelsrichtung.")
-    definition(
-        "Flow beschreibt, wie sich die spekulative Netto-Position relativ zum Open Interest verändert. "
-        "Eine Divergenz liegt erst vor, wenn ein ungewöhnlicher 4W-Preisimpuls und ein ungewöhnlicher "
-        "4W-Flow gegeneinander laufen und der 8W-Pfad eine negative Spearman-Korrelation zeigt."
-    )
 
     if spec_price_audit["future_prices"] > 0:
         st.error(
@@ -2131,11 +2094,6 @@ with tab4:
 
 with tab5:
     section_line("Stufe 6 · Saisonalität", "primär 10 Handelstage")
-    definition(
-        "Basisrate = unbedingte Positiv-Quote über alle Kalenderphasen desselben "
-        "Marktes und Horizonts. Saisonale Positiv-Quoten werden nur zusammen mit "
-        "dieser Vergleichsrate gezeigt."
-    )
     st.markdown("### Saisonalität · statistisch kalibriert")
     st.caption(
         "Primäre Frage: Was geschah historisch in den nächsten 10 Handelstagen? "
@@ -2360,12 +2318,6 @@ with tab5:
 
 with tab6:
     section_line("Historische Ereignisstudien", "publikationslag-korrigiert")
-    definition(
-        "Diese Seite zeigt historische Event-Renditen. Die bestehende COT-Event-"
-        "Logik berechnet zwar Trefferquoten, führt jedoch keine unbedingte "
-        "Markt-Basisrate mit. Deshalb werden diese Trefferquoten in der UI "
-        "bewusst nicht angezeigt; Median, Mittelwert und Ereigniszahl bleiben sichtbar."
-    )
     st.markdown("### Historische Ereignisauswertung")
     st.caption(
         "Die primäre Release-Historie basiert jetzt auf dem Commercial Net Percentile 156W. "
@@ -2695,262 +2647,7 @@ with tab6:
             )
 
 with tab7:
-    st.markdown("### V3.10.0 · Commercial 156W → Transition → Cross-Group Regime")
-    st.code(
-        f"""
-PRIMÄRER ZUSTAND — COMMERCIAL NET PERCENTILE ({validation_weeks} Wochen)
-
-FULL HEDGE:
-  Commercial Netto-Perzentil >= {validation_upper}
-  → Extremzustand, noch KEIN bullishes Signal
-
-LOW HEDGE:
-  Commercial Netto-Perzentil <= {validation_lower}
-  → Extremzustand, noch KEIN bärisches Signal
-
-
-TRANSITION
-  Δ1W / Δ4W des Commercial-156W-Perzentils
-  + Distanz zum Episoden-Extrem
-  + Dauer der Extrem-Episode
-
-EARLY RELEASE:
-  Perzentil bewegt sich bereits zurück, liegt aber noch innerhalb der Extremzone
-  → WATCH, noch KEIN Richtungs-Signal
-
-CONFIRMED RELEASE:
-  oberes Extrem wird nach unten verlassen → BULLISH RELEASE
-  unteres Extrem wird nach oben verlassen → BEARISH RELEASE
-
-
-BESTÄTIGUNG
-  Commercial-Seite = vorausgegangenes Episoden-Extrem
-  Retail = aktuelles 156W Netto-Perzentil auf der Gegenseite
-  NC / Spec Flow = zusätzliche Bestätigungs- bzw. Kontextschicht
-
-ADVANCED
-  26W COT-Index + {range_weeks}W Commercial-Range bleiben vollständig verfügbar,
-  lösen aber kein primäres V3.10.0-Signal aus.
-        """.strip(),
-        language="text",
-    )
-
-    st.markdown("### Interpretation")
-    st.markdown(
-        f"""
-        - **Commercial Net Percentile 156W bleibt der zentrale sichtbare Wert.** Er beschreibt,
-          wo die aktuelle Commercial-Netto-Position relativ zu den letzten {validation_weeks} Wochen liegt.
-        - Ein Wert im oberen oder unteren Extrem ist zunächst **STATE, nicht SIGNAL**.
-        - **Transition** misst die Bewegung dieses Zustands über Δ1W und Δ4W sowie die Distanz
-          zum Extrem der laufenden Episode.
-        - **Release** entsteht erst, wenn die 156W-Extremzone tatsächlich verlassen wird.
-        - Die Commercial-Bestätigung eines Releases referenziert bewusst das vorausgegangene
-          Episoden-Extrem. Der aktuelle Commercial-Wert liegt beim Release bereits außerhalb
-          der Zone und darf das korrekte Signal nicht selbst entbestätigen.
-        - Retail, Non-Commercial und Spec Flow bleiben als Bestätigung/Kontext erhalten.
-        - Open Interest bleibt sekundärer Partizipationskontext.
-        - Die historische Auswertung verwendet nur Informationen, die zum jeweiligen Report
-          bereits verfügbar waren.
-        """
-    )
-
-    st.markdown("### Positionierungsdynamik")
-    st.markdown(
-        """
-        Für Commercials werden neben dem aktuellen 156W-Perzentil dessen **Δ1W, Δ4W und Δ8W**,
-        die Distanz zum Episoden-Extrem und die Dauer der Extremphase gespeichert. Die bereits
-        vorhandenen Veränderungen der absoluten Netto-Kontrakte bleiben parallel verfügbar.
-        Dadurch werden Zustand und Bewegung getrennt statt in einem einzelnen Index vermischt.
-        """
-    )
-
-    st.markdown("### 26W COT-Index & Commercial-Range · Advanced")
-    st.markdown(
-        f"""
-        Der **{cot_weeks}W COT-Index** und die **{range_weeks}W Commercial-Range** werden nicht gelöscht.
-        Sie bleiben in Charts, Research Lab und Trade-Snapshots erhalten und können später auch
-        im Machine Learning gegen die 156W-State/Release-Logik getestet werden. Sie sind aber
-        **keine Gate-Bedingung** für das primäre Release-Signal mehr.
-        """
-    )
-
-    st.markdown("### Analysehierarchie")
-    st.markdown(
-        """
-        Die erste Ebene zeigt Commercial 156W, Transition, Release und Bestätigung. Rohdaten,
-        COT-Index, Range, zusätzliche Velocity-Metriken und methodische Details bleiben in den
-        Advanced-Tabs verfügbar. Commercial und Legacy-NC werden dabei weiterhin **nicht als
-        zwei unabhängige Bestätigungen** gezählt.
-        """
-    )
-
-    st.markdown("### Non-Commercial-Niveau vs. Dynamik")
-    st.markdown(
-        f"""
-        Non-Commercial bleibt als 156W-Netto-Perzentil, {cot_weeks}W-COT-Index und Flow-Dynamik
-        verfügbar. Ein extremes NC-Level beschreibt vor allem Crowding/Positionierungsphase.
-        Für einen möglichen Wendepunkt ist die Kombination aus Level und anschließend
-        gegenläufig drehendem Flow interessanter als der statische Wert allein.
-        """
-    )
-
-    st.markdown("### Eingefrorene Produktionsparameter")
-    st.markdown(
-        f"""
-        - Primärer Commercial-State: **Netto-Perzentil über {NET_VALIDATION_WEEKS} Wochen**
-        - 156W Extremgrenzen: **{NET_UPPER_PERCENTILE}/{NET_LOWER_PERCENTILE}**
-        - Transition: **Δ1W / Δ4W / Δ8W**, Episoden-Extrem, Extremdauer
-        - Release aktiv: **{RELEASE_ACTIVE_WEEKS} Wochen** nach Verlassen der Extremzone
-        - Advanced COT-Index: **{COT_INDEX_WEEKS} Wochen**, Grenzen **{INDEX_UPPER}/{INDEX_LOWER}**
-        - Advanced Commercial-Range: **{COMMERCIAL_RANGE_WEEKS} Wochen**
-        - Legacy-NC-Divergenz (nur Vergleich): **{NC_DIVERGENCE_WEEKS} Wochen**
-        - Neue Spec-Flow-Methodik: Preis **{NC_DIV_PRICE_WINDOW_W}W**, Flow **{NC_DIV_FLOW_WINDOW_W}W**, Pfad **{NC_DIV_PATH_WINDOW_W}W**
-        - Robuste Flow-Historie: **{NC_DIV_STANDARDIZE_HIST_W}W**, z-Schwelle **{NC_DIV_Z_THRESHOLD:.1f}**
-        - OI-Normalisierung: **{NC_DIV_USE_OI_NORM}**
-        - COT-Forward-Horizonte: **{FORWARD_HORIZONS_WEEKS[0]} und {FORWARD_HORIZONS_WEEKS[1]} Wochen**
-        - Saisonaler IQR-Faktor: **{SEASONAL_OUTLIER_IQR_FACTOR:.2f}**
-
-        Die produktive Marktanalyse hat dafür keine Optimierungsregler. Varianten werden
-        getrennt im Research Lab untersucht.
-        """
-    )
-
-    st.markdown("### Bedingungs-Watchlist")
-    st.markdown(
-        f"""
-        Die Haupt-Watchlist enthält nur **aktive 156W-Releases**, die ihre Bestätigungslogik
-        erfüllen. Ein FULL/LOW HEDGE ohne verlassenes Extrem erscheint separat als **Watch / Waiting**.
-        Der {range_weeks}W-Range-Wert und der 26W-COT-Index bleiben informativer Kontext und
-        blockieren einen ansonsten gültigen 156W-Release nicht mehr.
-        """
-    )
-
-    st.markdown("### Saisonalität")
-    st.markdown(
-        """
-        Die Saisonalität bleibt vollständig von der COT-Logik getrennt. Der feste
-        Primärhorizont beträgt **10 Handelstage**. Die Historienfenster
-        **5/10/15/20/30 Jahre** werden immer gemeinsam berechnet, damit kein Fenster
-        nachträglich anhand des attraktivsten Ergebnisses ausgewählt werden kann.
-
-        Für jede Fensterlänge werden reale historische Forward-Renditen vom gleichen
-        Handelsjahrespunkt berechnet. Die Positiv-Quote wird mit der **marktinternen
-        Basisrate aller Kalenderphasen desselben Horizonts** verglichen.
-        """
-    )
-
-    st.code(
-        """
-Primäre Saisonfrage:
-  Was geschah historisch in den nächsten 10 Handelstagen?
-
-Konsistenz:
-  5J / 10J / 15J / 20J / 30J immer gemeinsam
-  → Richtung je Fenster
-  → Anzahl bullischer / bärischer Fenster
-  → kein "ROBUST"-Label
-
-Statistische Einordnung:
-  positive Jahre / Stichprobe
-  Markt-Basisrate aller Kalenderphasen
-  Abstand zur Basisrate in Prozentpunkten
-  exakter zweiseitiger Binomial-p-Wert
-  95%-Wilson-Konfidenzintervall
-  Median / Mittelwert / Streuung
-
-Langfristige Referenz:
-  30 Jahre
-
-Horizonte:
-  10 / 20 / 40 / 60 Handelstage
-  → verschachtelte Zoomstufen
-  → keine unabhängigen Bestätigungen
-
-Saisonkurve:
-  IQR-gefilterte Tagesbewegungen
-  → ausschließlich Visualisierung
-        """.strip(),
-        language="text",
-    )
-
-    st.warning(
-        "Continuous-Futures können kalendergebundene Rollsprünge enthalten. "
-        "Für Saisonalität ist dies ein potenzieller Bias und nicht nur gewöhnliches Rauschen. "
-        "Die aktuelle Yahoo-Reihe ist daher ein Research-Proxy; eine rollbereinigte "
-        "Futures-Reihe wäre für eine belastbare Produktionsversion vorzuziehen."
-    )
-
-    st.markdown("### Hedger-Timing")
-    st.markdown(
-        """
-        Ein Commercial-Extrem wird als **Setup** behandelt. Das erstmalige Verlassen
-        der Extremzone wird separat als **Release** markiert. Dadurch wird nicht
-        unterstellt, dass bereits das bloße Erreichen von 80/20 das Timing liefert.
-        """
-    )
-
-    st.markdown("### Spekulativer Flow & Divergenz · V3.3.2")
-    st.markdown(
-        f"""
-        Die primäre spekulative Gruppe ist **Managed Money** bei Disaggregated-Rohstoffreports
-        und **Leveraged Funds** bei TFF-Finanzreports. Legacy Non-Commercial bleibt als
-        Vergleichspfad erhalten. Die neue Methodik ist bewusst von den eingefrorenen
-        Legacy-Produktionsparametern getrennt.
-
-        Preis- und Positionsdaten werden auf den COT-Stichtag ausgerichtet: verwendet wird
-        der letzte Tages-Schlusskurs **≤ Report-Dienstag**. Ein Preis aus einer späteren
-        Sitzung ist unzulässig. Fehlt die passende COT-Woche, wird weder 4W- noch 8W-Pfad
-        stillschweigend gestreckt.
-        """
-    )
-    st.code(
-        f"""
-Preis:
-  r_4w = log(Preis_t / Preis_t-{NC_DIV_PRICE_WINDOW_W}W)
-  z_price = (r_4w - Median) / (IQR / 1.349)
-
-Flow:
-  spec_net_oi = (Long - Short) / Open Interest
-  d_flow_4w = spec_net_oi_t - spec_net_oi_t-{NC_DIV_FLOW_WINDOW_W}W
-  z_flow = robuste Standardisierung über das vorangehende {NC_DIV_STANDARDIZE_HIST_W}W-Kalenderfenster
-
-Pfad:
-  rho = Spearman(Preis, spec_net_oi) über {NC_DIV_PATH_WINDOW_W} Wochen = {NC_DIV_PATH_WINDOW_W + 1} Wochenpunkte
-
-Bullische Divergenz:
-  z_price <= -{NC_DIV_Z_THRESHOLD:.1f}
-  z_flow  >= +{NC_DIV_Z_THRESHOLD:.1f}
-  rho < 0
-
-Bärische Divergenz:
-  Vorzeichen gespiegelt
-
-Divergenz-Stärke:
-  min(|z_price|, |z_flow|) * |rho|
-  plus historisches Stärke-Perzentil
-
-Kein Look-ahead:
-  Der aktuelle Wert t ist niemals Teil seiner eigenen {NC_DIV_STANDARDIZE_HIST_W}W-Referenzverteilung.
-
-Long-/Short-Schenkel:
-  bleiben als separater Befund erhalten; sie werden nicht in einen Gesamtscore eingerechnet.
-        """.strip(),
-        language="text",
-    )
-
-    with st.expander("Legacy-NC-Divergenz · nur Vergleich"):
-        st.code(
-            f"""
-Bullisch Legacy:
-  Preis {nc_lookback}W <= -{nc_min_price_move:.2f}%
-  NC-Netto / vorheriges NC-Brutto >= +{nc_min_net_move:.2f}%
-  NC-Netto steigt in mindestens {nc_min_confirming} von {nc_lookback} Wochen
-
-Bärisch Legacy:
-  Vorzeichen gespiegelt
-            """.strip(),
-            language="text",
-        )
+    st.info("Methodik und Validierungsdetails liegen ausschließlich im Admin-Bereich.")
 
 st.caption(
     f"Aufgelöster CFTC-Kontraktcode: {code} · Preis-Proxy: {price_ticker} · Spec Flow V3.3.2"

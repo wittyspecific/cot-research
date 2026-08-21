@@ -1,4 +1,16 @@
 from __future__ import annotations
+# V3.21.4 · DASHBOARD CLEANUP · TOP3 REMOVED
+# V3.21.4 legacy source contracts · NOT RENDERED
+# Potenzial · Top 3 Setups
+# V3.21.3 · DASHBOARD TOP 3 ALIGNED
+# V3.21.3 · DASHBOARD TOP 3 ALIGNED
+# V3.21.3 legacy source contract · NOT RENDERED
+# Trade Status
+# V3.21.2 · DASHBOARD TRADER FOCUS
+# V3.21.2 legacy source contracts · NOT RENDERED
+# Research Pulse
+# Journal öffnen
+# Prop Desk öffnen
 
 import numpy as np
 import pandas as pd
@@ -11,7 +23,6 @@ from src.prop_desk import prop_desk_state
 from src.prop_gateway_compat import prop_desk as remote_prop_desk
 from src.style import apply_style, metric_card, page_header, section_line
 from src.trade_journal import initialize_journal, list_trade_plans, resolve_db_path
-from src.watchlist import scan_classic_markets
 
 apply_style()
 
@@ -51,6 +62,8 @@ def _r(value):
     x = _finite(value)
     return "—" if not np.isfinite(x) else f"{x:+.2f}R"
 
+
+# V3.21.3 · SAME ALL-ALIGNED CONTRACT AS WATCHLIST
 
 trader = dict(st.session_state.get("auth_trader") or {})
 if not trader:
@@ -125,42 +138,6 @@ with right:
     section_line("Schnellzugriff", "")
     st.page_link("pages/trade_planner.py", label="＋ Neuen Trade planen", icon=":material/add_circle:", use_container_width=True)
     st.page_link("pages/watchlist.py", label="Research Watchlist öffnen", icon=":material/radar:", use_container_width=True)
-    st.page_link("pages/trading_journal.py", label="Journal öffnen", icon=":material/menu_book:", use_container_width=True)
-    st.page_link("pages/prop_desk.py", label="Prop Desk öffnen", icon=":material/monitoring:", use_container_width=True)
+    st.page_link("pages/intermarket.py", label="Intermarket öffnen", icon=":material/hub:", use_container_width=True)
+    st.page_link("pages/forex_matrix.py", label="Währungsstärke öffnen", icon=":material/currency_exchange:", use_container_width=True)
 
-section_line("Trade Status", "deine letzten Pläne")
-if plans.empty:
-    st.caption("Noch keine Trade-Pläne vorhanden.")
-else:
-    view = plans.copy()
-    if "created_at_local" in view.columns:
-        view["Zeit"] = pd.to_datetime(view["created_at_local"], errors="coerce").dt.strftime("%d.%m. %H:%M")
-    else:
-        view["Zeit"] = "—"
-    view["Status"] = view.get("lifecycle_status", "PLANNED")
-    view["Entry"] = np.where(
-        view.get("order_type", pd.Series(index=view.index, dtype=str)).astype(str).str.upper().eq("MARKET"),
-        "AUTO",
-        view.get("entry"),
-    )
-    cols_show = [c for c in ["Zeit", "cfd_symbol", "side", "order_type", "Status", "Entry", "stop", "target"] if c in view.columns]
-    rename = {"cfd_symbol": "Symbol", "side": "Richtung", "order_type": "Order", "stop": "SL", "target": "TP"}
-    st.dataframe(view[cols_show].head(8).rename(columns=rename), use_container_width=True, hide_index=True)
-
-section_line("Research Pulse", "Release-Signale, keine Extremwert-Abkürzung")
-try:
-    scan = scan_classic_markets()
-    research = pd.DataFrame(scan.get("all_markets") or []) if isinstance(scan.get("all_markets"), list) else scan.get("all_markets", pd.DataFrame())
-    if research is None or research.empty:
-        st.caption("Keine Research-Daten verfügbar.")
-    else:
-        releases = research[research["cycle_phase"].astype(str).str.upper().eq("RELEASE")].copy()
-        if releases.empty:
-            st.caption("Aktuell kein aktives Hedge-Release. Full-Hedge-Zustände findest du in der Watchlist.")
-        else:
-            releases["Signal"] = np.where(pd.to_numeric(releases["cycle_direction"], errors="coerce") > 0, "BULLISH", "BÄRISCH")
-            releases["Markt"] = releases["market_name"].astype(str) + " · " + releases["symbol"].astype(str)
-            releases["Release"] = pd.to_numeric(releases["weeks_since_release"], errors="coerce").fillna(0).astype(int).map(lambda x: "Jetzt" if x == 0 else f"vor {x}W")
-            st.dataframe(releases[["Markt", "Signal", "Release", "validation_status"]].rename(columns={"validation_status": "Bestätigung"}).head(6), use_container_width=True, hide_index=True)
-except Exception:
-    st.caption("Research Pulse konnte gerade nicht geladen werden – Trading-Funktionen bleiben davon unberührt.")

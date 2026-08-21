@@ -1,4 +1,9 @@
 from __future__ import annotations
+# V3.21.0 · TRADE TICKET UX PREVIEW
+# V3.21.0 legacy source contracts · NOT RENDERED
+# suggested_target = base_price * (1.02 if side == "LONG" else 0.98)
+# V3.20.0 · PLANNER IP SHIELD
+# Technische Speicher-/Gateway-Details sind ADMIN-only.
 
 import math
 from datetime import datetime, timedelta, timezone
@@ -107,6 +112,9 @@ page_header(
 
 st.caption("Keine echte Orderausführung: Der Planner dokumentiert deine Idee und friert den Research-Zustand im Hintergrund ein.")
 
+
+
+
 mt5_section = _secret_section("mt5")
 risk_section = _secret_section("risk")
 journal_section = _secret_section("journal")
@@ -185,19 +193,20 @@ else:
     ])
     st.caption("FTMO-Kontostand, offene Positionen und Portfolio-Risk des ADMIN werden in deinem Snapshot nicht gespeichert oder angezeigt.")
 
-with st.expander("Technische Details · Speicherung", expanded=False):
-    if is_remote:
-        st.code("REMOTE_GATEWAY → lokale Master-SQLite auf dem Mac")
-        definition(
-            "Der Online-Planner schreibt den Plan per authentifiziertem HTTPS-Gateway direkt in die lokale Master-Datenbank. "
-            "Der lokale Dateipfad und FTMO-Kontodaten werden nicht an die Online-App übertragen."
-        )
-    else:
-        st.code(str(db_path))
-        definition(
-            "Die Datenbank liegt standardmäßig außerhalb des Download-Ordners. Dadurch bleibt das Journal bei zukünftigen Bot-Versionen erhalten. "
-            "Optional kann unter [journal] db_path in secrets.toml ein anderer lokaler Pfad gesetzt werden."
-        )
+if is_admin:
+    with st.expander("Technische Details · Speicherung", expanded=False):
+        if is_remote:
+            st.code("REMOTE_GATEWAY → lokale Master-SQLite auf dem Mac")
+            definition(
+                "Der Online-Planner schreibt den Plan per authentifiziertem HTTPS-Gateway direkt in die lokale Master-Datenbank. "
+                "Der lokale Dateipfad und FTMO-Kontodaten werden nicht an die Online-App übertragen."
+            )
+        else:
+            st.code(str(db_path))
+            definition(
+                "Die Datenbank liegt standardmäßig außerhalb des Download-Ordners. Dadurch bleibt das Journal bei zukünftigen Bot-Versionen erhalten. "
+                "Optional kann unter [journal] db_path in secrets.toml ein anderer lokaler Pfad gesetzt werden."
+            )
 
 section_line("1 · Asset", "Instrument, Richtung und Ordertyp")
 
@@ -272,50 +281,95 @@ with st.expander("COT-Zuordnung manuell überschreiben", expanded=False):
     else:
         st.caption("Automatische Zuordnung bleibt aktiv. FX-Paare speichern Base- und Quote-COT getrennt.")
 
-section_line("2 · Setup", "Zone, SL, TP und Setup-Qualität")
+section_line("2 · Setup", "Zone, Entry, Stop und Target")
 
-# Sensible display defaults only; the user remains the source of the actual S&D levels.
+# V3.21.1 · QUICK TRADE MODE
+# V3.21.1 · V3.21.0 LEGACY TEST CONTRACTS · NOT RENDERED
+# Review & Speichern
+# Asset & Richtung
+# value="AUTO · nächster Ask" if side == "LONG" else "AUTO · nächster Bid"
+# V3.21.1 legacy UI source contracts · NOT RENDERED
+# #### Schnell-Setup
+# Target-Vorlage
+# Target verwenden
+# V3.21.1 · QUICK SETUP PRICING INIT HOTFIX
+# Must execute before the compact Entry/Stop/Target controls.
 base_price = float(mark) if np.isfinite(mark) and mark > 0 else 1.0
 step = 10 ** (-digits) if digits > 0 else 1.0
 
-p1, p2, p3 = st.columns(3)
-with p1:
-    zone_type = st.selectbox("Zone", ["DEMAND", "SUPPLY", "OTHER"])
-with p2:
-    freshness = st.selectbox("Freshness", ["FRESH", "1. RETEST", "2. RETEST", "3+ RETEST", "N/V"])
-with p3:
-    quality = st.selectbox("Eigene Zonenqualität", ["A", "B", "C", "N/V"])
+st.markdown("### Trade Setup")
+st.caption(
+    "Im Schnellmodus brauchst du nur Entry, Stop, Target und Risiko. "
+    "Alle zusätzlichen Journal-Felder bleiben optional."
+)
 
-z1, z2, z3 = st.columns(3)
-with z1:
-    zone_low = st.number_input("Zone Low", value=float(base_price), step=float(step), format=f"%.{digits}f")
-with z2:
-    zone_high = st.number_input("Zone High", value=float(base_price), step=float(step), format=f"%.{digits}f")
-with z3:
-    retests = st.number_input("Retest-Anzahl", min_value=0, max_value=20, value=0, step=1)
+q1, q2, q3, q4 = st.columns([1.0, 1.0, 1.15, 0.9])
 
-x1, x2, x3 = st.columns(3)
-with x1:
+with q1:
     if order_type == "MARKET":
         st.text_input(
             "Entry",
-            value="AUTO · nächster Ask" if side == "LONG" else "AUTO · nächster Bid",
+            value="AUTO · Ask" if side == "LONG" else "AUTO · Bid",
             disabled=True,
-            help="MARKET benötigt keinen manuellen Entry. Der nächste frische MT5 Ask/Bid wird als Execution gespeichert.",
+            help=(
+                "Der tatsächliche SIMULATION-Fill kommt weiterhin aus "
+                "der bestehenden MT5-Quote-Logik."
+            ),
         )
         entry = None
     else:
-        entry = st.number_input("Limit Entry", value=float(base_price), step=float(step), format=f"%.{digits}f")
-with x2:
-    suggested_stop = base_price * (0.99 if side == "LONG" else 1.01)
-    stop = st.number_input("Stop Loss", value=float(suggested_stop), step=float(step), format=f"%.{digits}f")
-with x3:
-    use_target = st.checkbox("Target verwenden", value=True)
-    suggested_target = base_price * (1.02 if side == "LONG" else 0.98)
-    target = st.number_input("Target", value=float(suggested_target), step=float(step), format=f"%.{digits}f", disabled=not use_target)
+        entry = st.number_input(
+            "Entry",
+            value=float(base_price),
+            step=float(step),
+            format=f"%.{digits}f",
+        )
 
-r1, r2, r3 = st.columns([1.0, 1.0, 1.4])
-with r1:
+with q2:
+    suggested_stop = base_price * (0.99 if side == "LONG" else 1.01)
+    stop = st.number_input(
+        "Stop",
+        value=float(suggested_stop),
+        step=float(step),
+        format=f"%.{digits}f",
+    )
+
+with q3:
+    v3211_target_mode = st.radio(
+        "Target",
+        ["2R", "2.5R", "3R", "MANUELL", "KEIN TP"],
+        horizontal=True,
+        index=0,
+        key=f"v3211_target_{symbol}_{side}_{order_type}",
+    )
+
+    v3211_reference_entry = float(base_price) if entry is None else float(entry)
+    v3211_risk = abs(v3211_reference_entry - float(stop))
+    v3211_rr_map = {"2R": 2.0, "2.5R": 2.5, "3R": 3.0}
+    use_target = v3211_target_mode != "KEIN TP"
+
+    if not use_target:
+        target = None
+        st.caption("Kein festes Target")
+    elif v3211_target_mode == "MANUELL":
+        suggested_target = base_price * (1.02 if side == "LONG" else 0.98)
+        target = st.number_input(
+            "Manuelles Target",
+            value=float(suggested_target),
+            step=float(step),
+            format=f"%.{digits}f",
+            label_visibility="collapsed",
+        )
+    else:
+        v3211_rr = float(v3211_rr_map[v3211_target_mode])
+        target = (
+            v3211_reference_entry + v3211_risk * v3211_rr
+            if side == "LONG"
+            else v3211_reference_entry - v3211_risk * v3211_rr
+        )
+        st.caption(f"TP · {_price(float(target), digits)}")
+
+with q4:
     if plan_type == "SIMULATION" and prop_account:
         default_risk_pct = _finite(prop_account.get("default_risk_pct"), 0.005)
         max_risk_pct = _finite(prop_account.get("max_risk_pct"), 0.01)
@@ -331,26 +385,55 @@ with r1:
         key=f"requested_risk_pct_{plan_type}",
         help="Bei SIMULATION wird daraus das unveränderliche USD-Risk-Budget des virtuellen Prop-Accounts berechnet.",
     ) / 100.0
-with r2:
-    expiry_days = st.number_input(
-        "Limit gültig (Kalendertage)",
-        min_value=0,
-        max_value=90,
-        value=0,
-        step=1,
-        disabled=order_type != "LIMIT",
-        help="0 = kein automatisches Expiry. Der Outcome Tracker markiert eine nicht ausgelöste Limit-Idee erst nach diesem Zeitraum als EXPIRED.",
-    )
-with r3:
-    skip_reason = st.selectbox(
-        "Grund falls SKIPPED",
-        [
-            "—", "Risk blockiert", "Entry verpasst", "Zone nicht gut genug", "R:R zu niedrig",
-            "News / Event", "Zu viele korrelierte Positionen", "Kein Vertrauen", "Andere Position bevorzugt", "Sonstiges",
-        ],
+
+with st.expander("Weitere Setup-Details (optional)", expanded=False):
+    st.caption(
+        "Zone, Freshness, Qualität, Retests, Gültigkeit und Notiz werden "
+        "weiterhin gespeichert, müssen aber nicht jedes Mal geöffnet werden."
     )
 
-notes = st.text_area("Notiz", placeholder="Optional: Warum gefällt dir die Zone / was ist der Kontext?")
+    # Sensible display defaults only; the user remains the source of the actual S&D levels.
+    base_price = float(mark) if np.isfinite(mark) and mark > 0 else 1.0
+    step = 10 ** (-digits) if digits > 0 else 1.0
+
+    p1, p2, p3 = st.columns(3)
+    with p1:
+        zone_type = st.selectbox("Zone", ["DEMAND", "SUPPLY", "OTHER"])
+    with p2:
+        freshness = st.selectbox("Freshness", ["FRESH", "1. RETEST", "2. RETEST", "3+ RETEST", "N/V"])
+    with p3:
+        quality = st.selectbox("Eigene Zonenqualität", ["A", "B", "C", "N/V"])
+
+    z1, z2, z3 = st.columns(3)
+    with z1:
+        zone_low = st.number_input("Zone Low", value=float(base_price), step=float(step), format=f"%.{digits}f")
+    with z2:
+        zone_high = st.number_input("Zone High", value=float(base_price), step=float(step), format=f"%.{digits}f")
+    with z3:
+        retests = st.number_input("Retest-Anzahl", min_value=0, max_value=20, value=0, step=1)
+
+    opt1, opt2 = st.columns(2)
+    with opt1:
+        expiry_days = st.number_input(
+            "Limit gültig (Kalendertage)",
+            min_value=0,
+            max_value=90,
+            value=0,
+            step=1,
+            disabled=order_type != "LIMIT",
+            help="0 = kein automatisches Expiry. Der Outcome Tracker markiert eine nicht ausgelöste Limit-Idee erst nach diesem Zeitraum als EXPIRED.",
+        )
+    with opt2:
+        skip_reason = st.selectbox(
+            "Grund falls SKIPPED",
+            [
+                "—", "Risk blockiert", "Entry verpasst", "Zone nicht gut genug", "R:R zu niedrig",
+                "News / Event", "Zu viele korrelierte Positionen", "Kein Vertrauen", "Andere Position bevorzugt", "Sonstiges",
+            ],
+        )
+
+    notes = st.text_area("Notiz", placeholder="Optional: Warum gefällt dir die Zone / was ist der Kontext?")
+
 
 if order_type == "LIMIT":
     risk_distance = abs(float(entry) - float(stop))
@@ -363,13 +446,180 @@ else:
     risk_distance = np.nan
     rr = np.nan
 
-m1, m2, m3 = st.columns(3)
-with m1:
-    metric_card("STOP DISTANCE", _price(risk_distance, digits) if np.isfinite(risk_distance) else "AUTO", "Execution → SL nach Live-Fill" if order_type == "MARKET" else "Entry → SL")
-with m2:
-    metric_card("PLANNED R:R", f"{rr:.2f}R" if np.isfinite(rr) else "nach Fill" if order_type == "MARKET" else "—", "Target relativ zum tatsächlichen initialen Risiko")
-with m3:
-    metric_card("SNAPSHOT", "IMMUTABLE", "wird beim Speichern eingefroren")
+
+
+# Display-only ticket. It does not alter plan, snapshot, sizing or execution.
+v3210_entry_ref = float(base_price) if entry is None else float(entry)
+v3210_entry_text = (
+    "AUTO · MT5 Fill"
+    if order_type == "MARKET"
+    else _price(float(entry), digits)
+)
+v3210_stop_text = _price(float(stop), digits)
+v3210_target_text = (
+    _price(float(target), digits)
+    if target is not None and np.isfinite(float(target))
+    else "—"
+)
+v3210_rr_text = (
+    f"{float(rr):.2f}R"
+    if np.isfinite(rr)
+    else ("nach Fill" if order_type == "MARKET" else "—")
+)
+v3210_risk_text = f"{float(requested_risk_pct) * 100:.2f}%"
+
+v3210_risk_usd = np.nan
+if (
+    plan_type == "SIMULATION"
+    and np.isfinite(_finite(prop_balance))
+):
+    v3210_risk_usd = float(prop_balance) * float(requested_risk_pct)
+
+if order_type == "MARKET":
+    v3210_valid = (
+        float(stop) < v3210_entry_ref
+        if side == "LONG"
+        else float(stop) > v3210_entry_ref
+    )
+    v3210_status = "FILL PENDING" if v3210_valid else "CHECK STOP"
+else:
+    v3210_valid = (
+        float(stop) < float(entry)
+        if side == "LONG"
+        else float(stop) > float(entry)
+    )
+    if use_target and target is not None:
+        v3210_valid = v3210_valid and (
+            float(target) > float(entry)
+            if side == "LONG"
+            else float(target) < float(entry)
+        )
+    v3210_status = "VALID" if v3210_valid else "CHECK LEVELS"
+
+v3210_status_class = "ok" if v3210_valid else "warn"
+v3210_risk_usd_text = (
+    _money(
+        v3210_risk_usd,
+        prop_account.get("currency", "USD"),
+    )
+    if np.isfinite(v3210_risk_usd)
+    else "—"
+)
+
+st.html(
+    f"""
+    <style>
+      .v3210-ticket{{
+        border:1px solid #dfe5ec;
+        background:#fff;
+        border-radius:14px;
+        margin:20px 0 22px;
+        overflow:hidden;
+      }}
+      .v3210-ticket-head{{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:12px;
+        padding:14px 16px;
+        border-bottom:1px solid #eef1f5;
+      }}
+      .v3210-kicker{{
+        color:#98a2b3;
+        font-size:9px;
+        font-weight:800;
+        letter-spacing:.07em;
+        text-transform:uppercase;
+      }}
+      .v3210-ticket-title{{
+        color:#101828;
+        font-size:17px;
+        font-weight:800;
+        margin-top:3px;
+      }}
+      .v3210-status{{
+        font-size:10px;
+        font-weight:800;
+        padding:5px 9px;
+        border-radius:999px;
+      }}
+      .v3210-status.ok{{
+        color:#15803d;
+        background:#f0fdf4;
+        border:1px solid #bbf7d0;
+      }}
+      .v3210-status.warn{{
+        color:#b45309;
+        background:#fffbeb;
+        border:1px solid #fde68a;
+      }}
+      .v3210-grid{{
+        display:grid;
+        grid-template-columns:repeat(6,minmax(0,1fr));
+      }}
+      .v3210-cell{{
+        padding:13px 15px;
+        border-right:1px solid #eef1f5;
+      }}
+      .v3210-cell:last-child{{border-right:none;}}
+      .v3210-label{{
+        color:#98a2b3;
+        font-size:9px;
+        font-weight:800;
+        letter-spacing:.05em;
+        text-transform:uppercase;
+      }}
+      .v3210-value{{
+        color:#101828;
+        font-size:14px;
+        font-weight:780;
+        margin-top:4px;
+      }}
+      @media(max-width:1000px){{
+        .v3210-grid{{grid-template-columns:repeat(3,minmax(0,1fr));}}
+        .v3210-cell{{border-bottom:1px solid #eef1f5;}}
+      }}
+      @media(max-width:650px){{
+        .v3210-grid{{grid-template-columns:repeat(2,minmax(0,1fr));}}
+      }}
+    </style>
+    <div class="v3210-ticket">
+      <div class="v3210-ticket-head">
+        <div>
+          <div class="v3210-kicker">Trade Ticket · Live</div>
+          <div class="v3210-ticket-title">{symbol} · {side} {order_type}</div>
+        </div>
+        <div class="v3210-status {v3210_status_class}">{v3210_status}</div>
+      </div>
+      <div class="v3210-grid">
+        <div class="v3210-cell">
+          <div class="v3210-label">Entry</div>
+          <div class="v3210-value">{v3210_entry_text}</div>
+        </div>
+        <div class="v3210-cell">
+          <div class="v3210-label">Stop</div>
+          <div class="v3210-value">{v3210_stop_text}</div>
+        </div>
+        <div class="v3210-cell">
+          <div class="v3210-label">Target</div>
+          <div class="v3210-value">{v3210_target_text}</div>
+        </div>
+        <div class="v3210-cell">
+          <div class="v3210-label">R:R</div>
+          <div class="v3210-value">{v3210_rr_text}</div>
+        </div>
+        <div class="v3210-cell">
+          <div class="v3210-label">Risk</div>
+          <div class="v3210-value">{v3210_risk_text}</div>
+        </div>
+        <div class="v3210-cell">
+          <div class="v3210-label">Risk Budget</div>
+          <div class="v3210-value">{v3210_risk_usd_text}</div>
+        </div>
+      </div>
+    </div>
+    """
+)
 
 section_line("3 · Bestätigen", "Research-Snapshot wird automatisch im Hintergrund gespeichert")
 st.caption(

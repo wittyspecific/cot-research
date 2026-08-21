@@ -101,6 +101,16 @@ from src.style import (
     tradingview_plotly_chart,
 )
 
+# V3.20.0 · ADVANCED DIRECT ACCESS GUARD
+_v3200_trader = dict(st.session_state.get("auth_trader") or {})
+if (
+    not _v3200_trader
+    or str(_v3200_trader.get("role", "TRADER")).upper() != "ADMIN"
+):
+    st.error("Kein Zugriff auf den Advanced-Bereich.")
+    st.stop()
+
+
 
 apply_style()
 

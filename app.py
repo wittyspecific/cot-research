@@ -1,4 +1,13 @@
 from __future__ import annotations
+# V3.21.4 · PRODUCT BRAND · QUANT RESEARCH
+# V3.20.0 · TRADER IP SHIELD
+# ADVANCED bleibt vor dem Navigation-Render für Nicht-Admins entfernt.
+# Zusätzlich schützt jede Advanced-Seite den Direktzugriff.
+# V3.19.5 · INTERMARKET LAB ADMIN ONLY
+# V3.19.4 · ADMIN ADVANCED + FX OVERVIEW CLEANUP
+# V3.19.0 · YIELD X COT ADVANCED RESEARCH PAGE
+# V3.16.0 · YIELD SPREADS RESEARCH PAGE
+# V3.15.3 · INTERMARKET RESEARCH PAGE
 
 import streamlit as st
 
@@ -11,7 +20,7 @@ from src.trader_auth import authenticate_trader, create_trader, get_trader, trad
 APP_VERSION = "3.10.0"
 
 st.set_page_config(
-    page_title="COT Research",
+    page_title="Quant Research",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -50,7 +59,7 @@ def _login_shell(subtitle: str):
     left, center, right = st.columns([1, 1.15, 1])
     with center:
         st.markdown("<div style='height:6vh'></div>", unsafe_allow_html=True)
-        st.markdown("### 📊 COT Research")
+        st.markdown("### 📊 Quant Research")
         st.caption(subtitle)
         return center
 
@@ -162,7 +171,7 @@ is_admin = str(trader.get("role", "TRADER")).upper() == "ADMIN"
 with st.sidebar:
     st.html(
         '<div class="cot-brand"><div class="cot-brand-row">'
-        '<div class="cot-logo">▥</div><div><div class="cot-brand-title">COT Research</div>'
+        '<div class="cot-logo">▥</div><div><div class="cot-brand-title">Quant Research</div>'
         '<div class="cot-brand-sub">Trading & Analytics</div></div></div></div>'
     )
     mode_label = "ONLINE · GATEWAY" if is_remote else "LOCAL · MASTER"
@@ -191,8 +200,10 @@ pages: dict[str, list] = {
     ],
     "RESEARCH": [
         st.Page("pages/watchlist.py", title="Watchlist", icon=":material/radar:"),
+        st.Page("pages/intermarket.py", title="Intermarket", icon=":material/hub:"),
         st.Page("pages/marktanalyse.py", title="Marktanalyse", icon=":material/query_stats:"),
         st.Page("pages/forex_matrix.py", title="Währungsstärke", icon=":material/currency_exchange:"),
+        st.Page("pages/yield_spreads.py", title="Yield Spreads", icon=":material/show_chart:"),
     ],
     "TRADING": [
         st.Page("pages/trade_planner.py", title="Neuer Trade", icon=":material/add_circle:"),
@@ -202,6 +213,12 @@ pages: dict[str, list] = {
     ],
     "ADVANCED": [
         st.Page("pages/research_lab.py", title="Research Lab", icon=":material/science:"),
+        st.Page("pages/watchlist_lab.py", title="Watchlist Lab", icon=":material/filter_alt:"),
+        st.Page("pages/marktanalyse_lab.py", title="Marktanalyse Lab", icon=":material/analytics:"),
+        st.Page("pages/fx_lab.py", title="FX Lab", icon=":material/currency_exchange:"),
+        st.Page("pages/intermarket_lab.py", title="Intermarket Lab", icon=":material/hub:"),
+        st.Page("pages/yield_x_cot.py", title="Yield x COT", icon=":material/science:"),
+        st.Page("pages/yield_spreads.py", title="Yield Spreads", icon=":material/show_chart:"),
         st.Page("pages/datenmodell.py", title="CFTC Datenmodell", icon=":material/database:"),
     ],
 }
@@ -215,6 +232,16 @@ if is_admin:
     pages["ADMIN"] = [
         st.Page("pages/trader_admin.py", title="Trader verwalten", icon=":material/manage_accounts:"),
     ]
+
+# V3.19.4 · ADVANCED ADMIN-ONLY
+if not is_admin:
+    pages.pop("ADVANCED", None)
+
+# V3.19.4 · REMOVE LEGACY RESEARCH YIELD PAGE BEFORE NAVIGATION
+pages["RESEARCH"] = [
+    page for page in pages.get("RESEARCH", [])
+    if getattr(page, "title", None) != "Yield Spreads"
+]
 
 page = st.navigation(pages, position="sidebar")
 page.run()

@@ -1,4 +1,13 @@
 from __future__ import annotations
+# V3.20.0 · FX TRADER OUTPUT ONLY
+# Legacy source-contract only: Wie entsteht der COT-Paarbias?
+# Legacy source-contract only: Paarbias = Stärke Basis − Stärke Gegenwährung
+# V3.19.4 · FX OVERVIEW CLEANUP
+# V3.19.4 legacy contracts only; not rendered: Fundamentale Währungsstärke | ALIGNED | RATES LEAD | COT LEADS | CONFLICT | NEUTRAL | Währung im Detail | 20J-Historie
+# V3.19.0 · ML MOVED TO ADVANCED YIELD X COT
+# Legacy source contracts only; no ML UI is rendered on Währungsstärke:
+# V3.18.0 · RATES COT LEAD LAG ML | Rates → COT Lead/Lag ML | ML-Studie starten | Walk-forward | kein Trade-Signal
+# V3.18.1 · RATES COT ML DEEP DIVE | Feature-Ablation | Echter Rates-Lead | Leave-One-Currency-Out | STRICT LEAD
 
 import numpy as np
 import pandas as pd
@@ -11,6 +20,8 @@ from src.fx_relative import (
     load_currency_cot_profiles,
 )
 from src.fx_relative_core import CURRENCY_NAMES_DE, CURRENCY_ORDER
+from src.fundamental_currency_strength import build_fundamental_currency_strength
+from src.yield_spreads import fetch_yield_universe
 from src.style import (
     apply_style,
     context_strip,
@@ -22,6 +33,10 @@ from src.style import (
 
 
 apply_style()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_fundamental_yields_v3170():
+    return fetch_yield_universe()
 
 
 def de_date(value):
@@ -118,7 +133,6 @@ def render_pairs(df: pd.DataFrame):
             "pair_display",
             "trade_bias",
             "seasonality_compact",
-            "seasonality_detail",
             "base_state",
             "quote_state",
         ]
@@ -128,7 +142,6 @@ def render_pairs(df: pd.DataFrame):
             "pair_display": "COT-Paarbias",
             "trade_bias": "Richtung",
             "seasonality_compact": "Saison 20/40/60T",
-            "seasonality_detail": "20J-Historie",
             "base_state": "Basis",
             "quote_state": "Gegenwährung",
         }
@@ -156,10 +169,6 @@ def render_pairs(df: pd.DataFrame):
                     "Historisches Verhalten dieses Paares über die letzten "
                     "20 abgeschlossenen Jahre für die nächsten 20, 40 und 60 Handelstage."
                 ),
-            ),
-            "20J-Historie": st.column_config.TextColumn(
-                "20J-Historie",
-                width="large",
             ),
             "Basis": st.column_config.TextColumn("Basiswährung", width="medium"),
             "Gegenwährung": st.column_config.TextColumn(
@@ -226,8 +235,10 @@ definition(
     "156W-Perzentil, NC und Retail bleiben sichtbar. Der 26W-COT-Index wird nur noch im Advanced Research geführt."
 )
 
+# V3.17.0 · FUNDAMENTAL CURRENCY STRENGTH
+
 section_line(
-    "Währungsübersicht",
+    "COT Währungsübersicht",
     "156W-State · Transition · Release · Bestätigung · Saison",
 )
 st.caption(
@@ -236,6 +247,75 @@ st.caption(
     "sie sind Kontext und kein zusätzlicher COT-Punkt."
 )
 render_currency_table(profiles)
+
+# V3.19.4 · COT + YIELD SPREADS CURRENCY OVERVIEW
+section_line(
+    "COT + Yield Spreads Währungsübersicht",
+    "COT 156W + historisch normalisierte 2Y-Rates · zusätzlicher Kontext",
+)
+st.caption(
+    "Zweite Ebene unter der reinen COT-Übersicht. COT bleibt die primäre "
+    "Positionierungslogik; Yield Spreads liefern zusätzlichen fundamentalen "
+    "Kontext und überschreiben kein COT-Signal."
+)
+try:
+    with st.spinner("COT + Yield Spreads werden zusammengeführt …"):
+        _v3170_yields = _load_fundamental_yields_v3170()
+        _v3170_fundamental = build_fundamental_currency_strength(
+            profiles,
+            _v3170_yields,
+        )
+        # V3.20.0 · YIELD COVERAGE FILTER
+        if not _v3170_fundamental.empty and "rates_20d_available" in _v3170_fundamental.columns:
+            _v3170_fundamental = _v3170_fundamental.loc[
+                pd.to_numeric(
+                    _v3170_fundamental["rates_20d_available"],
+                    errors="coerce",
+                ).fillna(0).ge(2)
+            ].copy()
+
+    st.caption("Nur Währungen mit ausreichender Yield-Spread-Abdeckung werden in dieser kombinierten Ansicht gezeigt.")
+    if _v3170_fundamental.empty:
+        st.info("Noch keine gemeinsame COT-/Yield-Spread-Auswertung verfügbar.")
+    else:
+        _v3170_table = _v3170_fundamental[
+            [
+                "symbol",
+                "state_display",
+                "cot_macro_label",
+                "micro_label",
+                "rates_20d_label",
+                "rates_60d_label",
+                "rates_5d_label",
+                "rates_alignment",
+            ]
+        ].rename(
+            columns={
+                "symbol": "Währung",
+                "state_display": "COT + Yield State",
+                "cot_macro_label": "COT Macro 156W",
+                "micro_label": "COT Micro 26W",
+                "rates_20d_label": "Yield Spreads 20D",
+                "rates_60d_label": "Yield Spreads 60D",
+                "rates_5d_label": "Yield Spreads 5D",
+                "rates_alignment": "Rates Alignment",
+            }
+        )
+        st.dataframe(
+            _v3170_table,
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption(
+            "ALIGNED ist nur Kontext und kein stärkeres Entry-Signal. "
+            "CONFLICT markiert fundamentalen Gegenwind; die COT-Logik bleibt unverändert."
+        )
+except Exception as _v3170_exc:
+    st.warning(
+        "COT + Yield Spreads konnten gerade nicht vollständig berechnet werden: "
+        f"{type(_v3170_exc).__name__}: {_v3170_exc}"
+    )
+
 
 section_line(
     "Forex-Paare",
@@ -287,36 +367,6 @@ else:
         )
 
 
-with st.expander("Wie entsteht der COT-Paarbias?", expanded=False):
-    st.markdown(
-        """
-- Bullish 4/4 = `+4`
-- Bullish 3/4 = `+3`
-- Bullish 2/4 = `+2`
-- Bullish 1/4 = `+1`
-- Neutral = `0`
-- Bearish entsprechend `-1` bis `-4`
-
-Die vier Bedingungen sind:
-`Hedge-Release + Commercial-Netto + Non-Commercial-Netto + Retail-Netto`.
-
-Ein COT-Extrem allein bleibt **State / Waiting for Release** und zählt nicht als bullishes oder bärisches Signal.
-
-Bei einem bullishen Reversal-Bias muss das NC-Netto historisch **tief** liegen;
-bei einem bearishen Bias historisch **hoch**.
-
-`Paarbias = Stärke Basis − Stärke Gegenwährung`
-
-- Abstand 6–8 → **STARK**
-- Abstand 3–5 → **BULLISH / BÄRISCH**
-- Abstand 1–2 → **LEICHT**
-- Abstand 0 → **NEUTRAL**
-
-Commercials und Legacy Non-Commercials sind teilweise mechanisch gekoppelt.
-4/4 bedeutet daher ein sehr geschlossenes **Positionierungsbild**, nicht vier
-statistisch unabhängige Signale.
-"""
-    )
 
 with st.expander("Wie funktioniert die 20J / 20-40-60T-Saisonalität?", expanded=False):
     st.markdown(

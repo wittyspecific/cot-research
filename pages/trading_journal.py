@@ -1,4 +1,6 @@
 from __future__ import annotations
+# V3.20.0 · JOURNAL IP SHIELD
+# Strategie-Snapshot und vollständiger Roh-Snapshot rendern nur für ADMIN.
 # V3.14.6 · JOURNAL ML SNAPSHOT & EXECUTION RR
 
 import numpy as np
@@ -353,39 +355,41 @@ if outcome:
         st.caption("Directional Forward Return · " + " · ".join(fwd))
 
 _strategy_blocks = find_strategy_logic_blocks(snapshot)
-with st.expander("Strategie-Snapshot · beim Trade eingefroren", expanded=False):
-    if not _strategy_blocks:
-        st.caption(
-            "Älterer Trade: Für diesen Plan existiert noch kein versionierter V3.14.6-Strategie-Snapshot. "
-            "Er wird nicht rückwirkend mit heutiger Logik beschriftet."
-        )
-    else:
-        for _strategy_path, _logic in _strategy_blocks:
-            _macro = dict(_logic.get("macro") or {})
-            _micro = dict(_logic.get("micro") or {})
-            _decision = dict(_logic.get("decision") or {})
-            _stage = dict(_macro.get("stage") or {})
-            _micro_age = _micro.get("age_weeks", "—")
-            _micro_status = "frisch" if _micro.get("fresh") else f"Alter {_micro_age}W"
-            _stage_text = (
-                f" · Stage {_stage.get('stage')} {_stage.get('label', '')}"
-                if _stage else ""
-            )
-            st.markdown(
-                f"**{_logic.get('logic_version', '—')}** · `{_strategy_path}`  \n"
-                f"**Makro:** {_macro.get('phase') or '—'} · {_macro.get('state') or '—'}{_stage_text}  \n"
-                f"**Mikro:** {_micro.get('label') or '—'} · {_micro_status}  \n"
-                f"**Entscheidung:** {_decision.get('bias') or '—'} · "
-                f"{_decision.get('plan') or '—'} · {_decision.get('signal') or '—'}"
-            )
+if is_admin:
+    with st.expander("Strategie-Snapshot · beim Trade eingefroren", expanded=False):
+        if not _strategy_blocks:
             st.caption(
-                "156W = Struktur/Release · 26W = eventbasierter 90/10 Fresh-Micro-Trigger · "
-                "Seasonality = Confluence only. Rohwerte bleiben für ML im eingefrorenen Snapshot."
+                "Älterer Trade: Für diesen Plan existiert noch kein versionierter V3.14.6-Strategie-Snapshot. "
+                "Er wird nicht rückwirkend mit heutiger Logik beschriftet."
             )
-            st.json(_logic, expanded=False)
+        else:
+            for _strategy_path, _logic in _strategy_blocks:
+                _macro = dict(_logic.get("macro") or {})
+                _micro = dict(_logic.get("micro") or {})
+                _decision = dict(_logic.get("decision") or {})
+                _stage = dict(_macro.get("stage") or {})
+                _micro_age = _micro.get("age_weeks", "—")
+                _micro_status = "frisch" if _micro.get("fresh") else f"Alter {_micro_age}W"
+                _stage_text = (
+                    f" · Stage {_stage.get('stage')} {_stage.get('label', '')}"
+                    if _stage else ""
+                )
+                st.markdown(
+                    f"**{_logic.get('logic_version', '—')}** · `{_strategy_path}`  \n"
+                    f"**Makro:** {_macro.get('phase') or '—'} · {_macro.get('state') or '—'}{_stage_text}  \n"
+                    f"**Mikro:** {_micro.get('label') or '—'} · {_micro_status}  \n"
+                    f"**Entscheidung:** {_decision.get('bias') or '—'} · "
+                    f"{_decision.get('plan') or '—'} · {_decision.get('signal') or '—'}"
+                )
+                st.caption(
+                    "156W = Struktur/Release · 26W = eventbasierter 90/10 Fresh-Micro-Trigger · "
+                    "Seasonality = Confluence only. Rohwerte bleiben für ML im eingefrorenen Snapshot."
+                )
+                st.json(_logic, expanded=False)
 
-with st.expander("Vollständigen eingefrorenen Snapshot anzeigen", expanded=False):
-    st.json(snapshot, expanded=False)
+if is_admin:
+    with st.expander("Vollständigen eingefrorenen Snapshot anzeigen", expanded=False):
+        st.json(snapshot, expanded=False)
 
 status_now = str(outcome.get("lifecycle_status") or "PLANNED").upper() if outcome else "PLANNED"
 triggered_now = bool(outcome.get("entry_triggered") or 0) if outcome else False
