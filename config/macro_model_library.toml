@@ -1,0 +1,60 @@
+
+# V3.24.0 · Macro Navigation Rebuild
+# Public/reproducible architecture. Not Henrik Zeberg's proprietary formula.
+
+[cache]
+path = ".cache/macro_model_library/v3241_macro.sqlite3"
+ttl_hours = 12.0
+timeout_seconds = 20.0
+
+[normalization]
+years = 10
+monthly_min_obs = 36
+weekly_min_obs = 104
+z_clip = 3.5
+
+[equilibrium]
+lookback_weeks = 520
+min_weeks = 156
+distance_threshold = 5.0
+slope_weeks = 13
+
+[phase]
+persistence_weeks = 4
+persistence_required = 3
+
+[breadth]
+atomic_threshold = 20.0
+family_agreement_threshold = 0.60
+family_confirmation_threshold = 0.70
+
+[imminent]
+short_rate_score = -35.0
+claims_score = -20.0
+labor_score = -20.0
+credit_score = -20.0
+restepening_bp = 50.0
+coincident_distance_watch = 10.0
+
+[tier_family_weights.leading]
+housing = 1.0
+orders = 1.0
+labor_leading = 1.0
+yield_curve = 1.0
+sentiment = 1.0
+
+[tier_family_weights.coincident]
+employment = 1.0
+production = 1.0
+income = 1.0
+sales = 1.0
+
+[tier_family_weights.lagging]
+inflation = 1.0
+policy_rates = 1.0
+long_yields = 1.0
+
+[liquidity_weights]
+policy = 1.0
+credit = 1.0
+market = 1.0

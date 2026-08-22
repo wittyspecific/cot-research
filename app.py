@@ -1,4 +1,5 @@
 from __future__ import annotations
+# V3.23.0 · MACRO MODEL LIBRARY
 # V3.22.7 · COT × SEASONALITY LAB
 # V3.22.6 · SEASONALITY EDGE LAB
 # V3.22.0 · MARKET REGIME + VOLATILITY + CREDIT RESEARCH
@@ -207,6 +208,9 @@ pages: dict[str, list] = {
         st.Page("pages/marktanalyse.py", title="Marktanalyse", icon=":material/query_stats:"),
         st.Page("pages/forex_matrix.py", title="Währungsstärke", icon=":material/currency_exchange:"),
         st.Page("pages/yield_spreads.py", title="Yield Spreads", icon=":material/show_chart:"),
+        st.Page("pages/macro_model_library.py", title="Makro Model Library", icon=":material/public:"),
+        st.Page("pages/cot_price_analog.py", title="COT × Price Analog", icon=":material/history:"),
+        st.Page("pages/fx_relative_cot_analog.py", title="FX Relative COT Analog", icon=":material/currency_exchange:"),
         st.Page("pages/market_regime.py", title="Market Regime", icon=":material/public:"),
         st.Page("pages/volatility_regime.py", title="Volatility Regime", icon=":material/show_chart:"),
         st.Page("pages/credit_stress.py", title="Credit Stress", icon=":material/account_balance:"),
@@ -228,6 +232,7 @@ pages: dict[str, list] = {
         st.Page("pages/yield_x_cot.py", title="Yield x COT", icon=":material/science:"),
         st.Page("pages/yield_spreads.py", title="Yield Spreads", icon=":material/show_chart:"),
         st.Page("pages/datenmodell.py", title="CFTC Datenmodell", icon=":material/database:"),
+        st.Page("pages/analog_diagnostics.py", title="Analog Diagnostics", icon=":material/tune:"),
     ],
 }
 

@@ -17,3 +17,6 @@ gateway_key.txt
 
 # Local patch backups
 *.bak
+
+# V3.23.0 Macro Model Library persistent research cache
+.cache/macro_model_library/

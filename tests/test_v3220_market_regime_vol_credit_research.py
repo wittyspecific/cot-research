@@ -28,17 +28,44 @@ def _section(text: str, name: str):
 def test_navigation_places_three_pages_after_currency_strength_visible_order():
     text = APP.read_text(encoding="utf-8")
     research = _section(text, "RESEARCH")
-    fx = next(i for i, item in enumerate(research) if "pages/forex_matrix.py" in item)
+
+    fx_matrix = next(i for i, item in enumerate(research) if "pages/forex_matrix.py" in item)
     market = next(i for i, item in enumerate(research) if "pages/market_regime.py" in item)
     vol = next(i for i, item in enumerate(research) if "pages/volatility_regime.py" in item)
     credit = next(i for i, item in enumerate(research) if "pages/credit_stress.py" in item)
+
     legacy_yield = [i for i, item in enumerate(research) if "pages/yield_spreads.py" in item]
+    macro = [i for i, item in enumerate(research) if "pages/macro_model_library.py" in item]
+    analog = [i for i, item in enumerate(research) if "pages/cot_price_analog.py" in item]
+    fx_analog = [i for i, item in enumerate(research) if "pages/fx_relative_cot_analog.py" in item]
+
     if legacy_yield:
-        assert legacy_yield[0] == fx + 1
-        assert market == legacy_yield[0] + 1
+        assert legacy_yield[0] == fx_matrix + 1
+
+    if macro:
+        if legacy_yield:
+            assert macro[0] == legacy_yield[0] + 1
+        else:
+            assert macro[0] == fx_matrix + 1
+
+        if analog:
+            assert analog[0] == macro[0] + 1
+
+            if fx_analog:
+                assert fx_analog[0] == analog[0] + 1
+                assert market == fx_analog[0] + 1
+            else:
+                assert market == analog[0] + 1
+        else:
+            assert market == macro[0] + 1
     else:
-        assert market == fx + 1
-    assert market < vol < credit
+        assert market == fx_matrix + 1
+
+    assert vol == market + 1
+    assert credit == vol + 1
+
+
+
 
 
 def test_market_regime_uses_equal_bucket_votes():
