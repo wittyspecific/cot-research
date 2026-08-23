@@ -316,7 +316,7 @@ page_header(
 nav_back_col, nav_hint_col = st.columns([0.22, 0.78])
 with nav_back_col:
     st.page_link(
-        "pages/watchlist.py",
+        "pages/opportunity_scanner.py",
         label="← COT Watchlist",
         icon=":material/arrow_back:",
     )
@@ -923,7 +923,7 @@ st.caption(
 action_a, action_b, action_c = st.columns([0.34, 0.33, 0.33])
 with action_a:
     st.page_link(
-        "pages/watchlist.py",
+        "pages/opportunity_scanner.py",
         label="← Watchlist",
         icon=":material/view_list:",
     )

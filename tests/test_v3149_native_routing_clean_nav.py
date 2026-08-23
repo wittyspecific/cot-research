@@ -7,10 +7,25 @@ WATCH = ROOT / "pages" / "watchlist.py"
 
 
 def test_sidebar_no_long_asset_subpage_list():
-    text = APP.read_text(encoding="utf-8")
-    assert "from src.watchlist_asset_nav import WATCHLIST_ASSET_PAGES" not in text
-    assert "for item in WATCHLIST_ASSET_PAGES" not in text
-    assert 'st.Page("pages/watchlist.py", title="Watchlist"' in text
+    from pathlib import Path
+    import ast
+    app = Path(__file__).resolve().parents[1] / "app.py"
+    text = app.read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    research = None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        for key, value in zip(node.keys, node.values):
+            if isinstance(key, ast.Constant) and key.value == "RESEARCH" and isinstance(value, ast.List):
+                research = value
+    assert research is not None
+    paths = []
+    for item in research.elts:
+        for child in ast.walk(item):
+            if isinstance(child, ast.Constant) and isinstance(child.value, str) and child.value.startswith("pages/"):
+                paths.append(child.value); break
+    assert paths == ["pages/opportunity_scanner.py", "pages/market_analysis_hub.py", "pages/currency_strength_hub.py", "pages/macro_regime.py"]
 
 
 def test_native_market_route_sets_handoff_and_switches_page():

@@ -128,7 +128,7 @@ page_header(
 back_col, detail_col, research_col = st.columns([0.28, 0.36, 0.36])
 with back_col:
     st.page_link(
-        "pages/watchlist.py",
+        "pages/opportunity_scanner.py",
         label="← Watchlist",
         icon=":material/arrow_back:",
     )

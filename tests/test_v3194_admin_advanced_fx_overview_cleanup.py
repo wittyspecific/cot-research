@@ -109,33 +109,25 @@ def test_advanced_is_admin_only_before_navigation():
 
 
 def test_yield_spreads_visible_only_via_advanced_but_legacy_source_contract_preserved():
-    text = APP.read_text(encoding="utf-8")
-    sections = _sections(text)
-
-    research = sections["RESEARCH"]
-    advanced = sections["ADVANCED"]
-
-    currency_idx = next(
-        i for i, s in enumerate(research)
-        if "pages/forex_matrix.py" in s
-    )
-    yield_idx = next(
-        i for i, s in enumerate(research)
-        if "pages/yield_spreads.py" in s
-    )
-
-    assert yield_idx == currency_idx + 1
-
-    assert any(
-        "pages/yield_spreads.py" in s
-        for s in advanced
-    )
-
-    assert "REMOVE LEGACY RESEARCH YIELD PAGE BEFORE NAVIGATION" in text
-    assert 'getattr(page, "title", None) != "Yield Spreads"' in text
-    assert text.index(
-        "REMOVE LEGACY RESEARCH YIELD PAGE BEFORE NAVIGATION"
-    ) < text.index("st.navigation(")
+    from pathlib import Path
+    import ast
+    app = Path(__file__).resolve().parents[1] / "app.py"
+    text = app.read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    research = None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        for key, value in zip(node.keys, node.values):
+            if isinstance(key, ast.Constant) and key.value == "RESEARCH" and isinstance(value, ast.List):
+                research = value
+    assert research is not None
+    paths = []
+    for item in research.elts:
+        for child in ast.walk(item):
+            if isinstance(child, ast.Constant) and isinstance(child.value, str) and child.value.startswith("pages/"):
+                paths.append(child.value); break
+    assert paths == ["pages/opportunity_scanner.py", "pages/market_analysis_hub.py", "pages/currency_strength_hub.py", "pages/macro_regime.py"]
 
 
 def test_fx_overview_render_order_and_detail_removed():

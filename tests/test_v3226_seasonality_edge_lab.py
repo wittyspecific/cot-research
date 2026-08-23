@@ -47,11 +47,25 @@ def _app_sections():
 
 
 def test_page_is_under_research():
-    sections = _app_sections()
-    assert "RESEARCH" in sections
-    research = "\n".join(sections["RESEARCH"])
-    assert "pages/seasonality_edge_lab.py" in research
-    assert "Seasonality Edge Lab" in research
+    from pathlib import Path
+    import ast
+    app = Path(__file__).resolve().parents[1] / "app.py"
+    text = app.read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    research = None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        for key, value in zip(node.keys, node.values):
+            if isinstance(key, ast.Constant) and key.value == "RESEARCH" and isinstance(value, ast.List):
+                research = value
+    assert research is not None
+    paths = []
+    for item in research.elts:
+        for child in ast.walk(item):
+            if isinstance(child, ast.Constant) and isinstance(child.value, str) and child.value.startswith("pages/"):
+                paths.append(child.value); break
+    assert paths == ["pages/opportunity_scanner.py", "pages/market_analysis_hub.py", "pages/currency_strength_hub.py", "pages/macro_regime.py"]
 
 
 def test_research_page_contains_edge_sections():

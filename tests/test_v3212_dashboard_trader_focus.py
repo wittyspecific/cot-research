@@ -24,11 +24,12 @@ def test_quick_access_has_requested_four_destinations():
     text = DASH.read_text(encoding="utf-8")
     executable = _executable_calls(text)
 
+    # V3.29.x dashboard quick access follows the consolidated trader workflow.
     for path in (
         "pages/trade_planner.py",
-        "pages/watchlist.py",
-        "pages/intermarket.py",
-        "pages/forex_matrix.py",
+        "pages/opportunity_scanner.py",
+        "pages/market_analysis_hub.py",
+        "pages/currency_strength_hub.py",
     ):
         assert f'st.page_link("{path}"' in executable
 
@@ -43,11 +44,16 @@ def test_journal_and_prop_desk_are_not_quick_access_links():
 
 def test_intermarket_precedes_currency_strength():
     text = DASH.read_text(encoding="utf-8")
-    assert text.index(
-        'st.page_link("pages/intermarket.py"'
-    ) < text.index(
-        'st.page_link("pages/forex_matrix.py"'
+
+    # V3.29.x: Intermarket is integrated into Marktanalyse.
+    market = text.index(
+        'st.page_link("pages/market_analysis_hub.py"'
     )
+    currency = text.index(
+        'st.page_link("pages/currency_strength_hub.py"'
+    )
+
+    assert market < currency
 
 
 def test_trade_status_is_no_longer_rendered():

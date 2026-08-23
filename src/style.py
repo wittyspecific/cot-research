@@ -755,3 +755,476 @@ def tradingview_chart(
                 fig.update_xaxes(range=[start, end])
 
     return fig
+
+# V3.29.2.1 · WORKSPACE DARK CONSISTENCY
+_v32921_base_apply_style = apply_style
+
+
+def _v32921_workspace_dark_overlay() -> None:
+    st.markdown(
+        """
+        <style>
+        :root {
+            --qa-bg: #0B0F14;
+            --qa-panel: #131B24;
+            --qa-panel-2: #18222D;
+            --qa-header: #1A2029;
+            --qa-border: #29333E;
+            --qa-text: #F3F6FB;
+            --qa-text-soft: #C3CCD6;
+            --qa-muted: #98A4B3;
+            --qa-info: #62A6C9;
+        }
+
+        /* ---------------------------------------------------------
+           Global titles / headings
+           --------------------------------------------------------- */
+        [data-testid="stAppViewContainer"] h1,
+        [data-testid="stAppViewContainer"] h2,
+        [data-testid="stAppViewContainer"] h3,
+        [data-testid="stAppViewContainer"] h4,
+        [data-testid="stSidebar"] h1,
+        [data-testid="stSidebar"] h2,
+        [data-testid="stSidebar"] h3,
+        [data-testid="stSidebar"] strong {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        /* Quant Research / branding */
+        [class*="brand"],
+        [class*="brand"] *,
+        [class*="logo-title"],
+        [class*="logo-title"] *,
+        [class*="app-title"],
+        [class*="app-title"] *,
+        [class*="workspace-title"],
+        [class*="workspace-title"] * {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        [class*="brand"] small,
+        [class*="brand"] p,
+        [class*="subtitle"],
+        [class*="subtitle"] * {
+            color: var(--qa-muted) !important;
+            -webkit-text-fill-color: var(--qa-muted) !important;
+        }
+
+        /* ---------------------------------------------------------
+           Neutralize legacy inline white cards.
+           This catches the old dashboard KPI cards and sidebar user card
+           without touching model/data code.
+           --------------------------------------------------------- */
+        [data-testid="stAppViewContainer"] [style*="background: white"],
+        [data-testid="stAppViewContainer"] [style*="background:white"],
+        [data-testid="stAppViewContainer"] [style*="background-color: white"],
+        [data-testid="stAppViewContainer"] [style*="background-color:white"],
+        [data-testid="stAppViewContainer"] [style*="background: #fff"],
+        [data-testid="stAppViewContainer"] [style*="background:#fff"],
+        [data-testid="stAppViewContainer"] [style*="background: #FFF"],
+        [data-testid="stAppViewContainer"] [style*="background:#FFF"],
+        [data-testid="stAppViewContainer"] [style*="background: #ffffff"],
+        [data-testid="stAppViewContainer"] [style*="background:#ffffff"],
+        [data-testid="stAppViewContainer"] [style*="background: #FFFFFF"],
+        [data-testid="stAppViewContainer"] [style*="background:#FFFFFF"],
+        [data-testid="stSidebar"] [style*="background: white"],
+        [data-testid="stSidebar"] [style*="background:white"],
+        [data-testid="stSidebar"] [style*="background-color: white"],
+        [data-testid="stSidebar"] [style*="background-color:white"],
+        [data-testid="stSidebar"] [style*="background: #fff"],
+        [data-testid="stSidebar"] [style*="background:#fff"],
+        [data-testid="stSidebar"] [style*="background: #ffffff"],
+        [data-testid="stSidebar"] [style*="background:#ffffff"],
+        [data-testid="stSidebar"] [style*="background: #FFFFFF"],
+        [data-testid="stSidebar"] [style*="background:#FFFFFF"] {
+            background: var(--qa-panel) !important;
+            background-color: var(--qa-panel) !important;
+            border-color: var(--qa-border) !important;
+            color: var(--qa-text) !important;
+        }
+
+        [data-testid="stAppViewContainer"] [style*="background: white"] *,
+        [data-testid="stAppViewContainer"] [style*="background:white"] *,
+        [data-testid="stAppViewContainer"] [style*="background-color: white"] *,
+        [data-testid="stAppViewContainer"] [style*="background-color:white"] *,
+        [data-testid="stAppViewContainer"] [style*="background: #fff"] *,
+        [data-testid="stAppViewContainer"] [style*="background:#fff"] *,
+        [data-testid="stAppViewContainer"] [style*="background: #ffffff"] *,
+        [data-testid="stAppViewContainer"] [style*="background:#ffffff"] *,
+        [data-testid="stAppViewContainer"] [style*="background: #FFFFFF"] *,
+        [data-testid="stAppViewContainer"] [style*="background:#FFFFFF"] *,
+        [data-testid="stSidebar"] [style*="background: white"] *,
+        [data-testid="stSidebar"] [style*="background:white"] *,
+        [data-testid="stSidebar"] [style*="background-color: white"] *,
+        [data-testid="stSidebar"] [style*="background-color:white"] *,
+        [data-testid="stSidebar"] [style*="background: #fff"] *,
+        [data-testid="stSidebar"] [style*="background:#fff"] *,
+        [data-testid="stSidebar"] [style*="background: #ffffff"] *,
+        [data-testid="stSidebar"] [style*="background:#ffffff"] *,
+        [data-testid="stSidebar"] [style*="background: #FFFFFF"] *,
+        [data-testid="stSidebar"] [style*="background:#FFFFFF"] * {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        /* Common legacy custom card class names */
+        .metric-card,
+        .kpi-card,
+        .dashboard-card,
+        .stat-card,
+        .summary-card,
+        .user-card,
+        .admin-card,
+        .sidebar-card {
+            background: var(--qa-panel) !important;
+            border: 1px solid var(--qa-border) !important;
+            color: var(--qa-text) !important;
+            box-shadow: none !important;
+        }
+
+        .metric-card *,
+        .kpi-card *,
+        .dashboard-card *,
+        .stat-card *,
+        .summary-card *,
+        .user-card *,
+        .admin-card *,
+        .sidebar-card * {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        /* Native Streamlit metrics */
+        [data-testid="stMetric"] {
+            background: var(--qa-panel) !important;
+            border: 1px solid var(--qa-border) !important;
+            border-radius: 14px !important;
+            padding: 0.85rem 1rem !important;
+        }
+
+        [data-testid="stMetric"] label,
+        [data-testid="stMetric"] [data-testid="stMetricLabel"],
+        [data-testid="stMetric"] [data-testid="stMetricValue"] {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        /* ---------------------------------------------------------
+           Sidebar user / logout
+           --------------------------------------------------------- */
+        [data-testid="stSidebar"] [data-testid="stButton"] button,
+        [data-testid="stSidebar"] [data-testid="stBaseButton-secondary"],
+        [data-testid="stSidebar"] [data-testid="stPageLink"] a {
+            background: var(--qa-panel) !important;
+            color: var(--qa-text) !important;
+            border: 1px solid var(--qa-border) !important;
+            box-shadow: none !important;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stButton"] button *,
+        [data-testid="stSidebar"] [data-testid="stPageLink"] a * {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        /* ---------------------------------------------------------
+           Dashboard quick access
+           --------------------------------------------------------- */
+        [data-testid="stMainBlockContainer"] [data-testid="stPageLink"] a {
+            background: var(--qa-panel) !important;
+            color: var(--qa-text) !important;
+            border: 1px solid var(--qa-border) !important;
+            box-shadow: none !important;
+        }
+
+        [data-testid="stMainBlockContainer"] [data-testid="stPageLink"] a:hover {
+            background: var(--qa-panel-2) !important;
+            border-color: rgba(98, 166, 201, 0.50) !important;
+        }
+
+        [data-testid="stMainBlockContainer"] [data-testid="stPageLink"] a * {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        /* ---------------------------------------------------------
+           Login / text inputs
+           --------------------------------------------------------- */
+        [data-testid="stTextInput"] label,
+        [data-testid="stTextInput"] label *,
+        [data-testid="stForm"] label,
+        [data-testid="stForm"] label * {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+            opacity: 1 !important;
+        }
+
+        [data-testid="stTextInput"] div[data-baseweb="input"],
+        [data-testid="stTextInput"] div[data-baseweb="base-input"],
+        [data-testid="stTextInput"] input {
+            background: #111923 !important;
+            background-color: #111923 !important;
+            color: var(--qa-text) !important;
+            border-color: var(--qa-border) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+            caret-color: var(--qa-text) !important;
+        }
+
+        [data-testid="stTextInput"] input::placeholder {
+            color: #7F8A99 !important;
+            -webkit-text-fill-color: #7F8A99 !important;
+            opacity: 1 !important;
+        }
+
+        [data-testid="stTextInput"] svg {
+            color: var(--qa-text-soft) !important;
+            fill: var(--qa-text-soft) !important;
+        }
+
+        /* Login form border / body */
+        [data-testid="stForm"] {
+            background: transparent !important;
+            border-color: #394553 !important;
+        }
+
+        /*
+        Keep primary actions such as "Anmelden" visually prominent.
+        Secondary actions stay dark.
+        */
+        [data-testid="stForm"] [data-testid="stBaseButton-primary"] {
+            background: var(--qa-info) !important;
+            color: #081018 !important;
+            border-color: var(--qa-info) !important;
+        }
+
+        [data-testid="stForm"] [data-testid="stBaseButton-primary"] * {
+            color: #081018 !important;
+            -webkit-text-fill-color: #081018 !important;
+        }
+
+        /* Secondary descriptive text */
+        [data-testid="stCaptionContainer"],
+        [data-testid="stCaptionContainer"] *,
+        small {
+            color: var(--qa-muted) !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def apply_style() -> None:
+    _v32921_base_apply_style()
+    _v32921_workspace_dark_overlay()
+# ---------------------------------------------------------------------------
+# V3.29.4 · LEGACY WATCHLIST DARK OVERRIDE
+# UI-only. The original watchlist mechanics and trading engines stay untouched.
+# ---------------------------------------------------------------------------
+
+_v32940_base_apply_style = apply_style
+
+
+def _v32940_watchlist_dark_overlay() -> None:
+    st.markdown(
+        """
+        <style>
+        /* -------- Legacy Watchlist custom HTML -------- */
+        .sw-wrap {
+            color: #EDF2F7 !important;
+        }
+
+        .sw-title,
+        .sw-card-value,
+        .sw-market-name,
+        .sw-bias,
+        .sw-plan {
+            color: #EDF2F7 !important;
+            -webkit-text-fill-color: #EDF2F7 !important;
+        }
+
+        .sw-kicker,
+        .sw-subtitle,
+        .sw-card-label,
+        .sw-legend-item,
+        .sw-market-code {
+            color: #929EAD !important;
+            -webkit-text-fill-color: #929EAD !important;
+        }
+
+        .sw-card,
+        .sw-legend,
+        .sw-table {
+            background: #0F151C !important;
+            background-color: #0F151C !important;
+            border-color: #29333E !important;
+            box-shadow: none !important;
+        }
+
+        .sw-header {
+            background: #1A2029 !important;
+            background-color: #1A2029 !important;
+            color: #AEB8C4 !important;
+            -webkit-text-fill-color: #AEB8C4 !important;
+            border-bottom-color: #33404D !important;
+        }
+
+        .sw-row {
+            background: #0B0F14 !important;
+            background-color: #0B0F14 !important;
+            border-top-color: #202A34 !important;
+        }
+
+        .sw-row:hover {
+            background: #111923 !important;
+            background-color: #111923 !important;
+        }
+
+        .sw-market,
+        .sw-market > div {
+            background: transparent !important;
+            background-color: transparent !important;
+        }
+
+        .sw-market-icon {
+            background: #131B24 !important;
+            background-color: #131B24 !important;
+            color: #EDF2F7 !important;
+        }
+
+        /* Direction remains visible through restrained accent chips. */
+        .sw-chip.macro-bull {
+            background: rgba(34,197,94,.12) !important;
+            color: #86EFAC !important;
+        }
+
+        .sw-chip.macro-bear {
+            background: rgba(239,68,68,.12) !important;
+            color: #FCA5A5 !important;
+        }
+
+        .sw-chip.macro-neutral {
+            background: #18222D !important;
+            color: #AEB8C4 !important;
+        }
+
+        .sw-chip.micro-bull {
+            background: rgba(98,166,201,.14) !important;
+            color: #93C5FD !important;
+        }
+
+        .sw-chip.micro-bear {
+            background: rgba(239,68,68,.10) !important;
+            color: #FCA5A5 !important;
+        }
+
+        .sw-chip.micro-neutral {
+            background: #18222D !important;
+            color: #AEB8C4 !important;
+        }
+
+        .sw-signal.signal-aligned {
+            background: rgba(34,197,94,.12) !important;
+            color: #86EFAC !important;
+            border-color: rgba(34,197,94,.24) !important;
+        }
+
+        .sw-signal.signal-watch {
+            background: rgba(245,158,11,.12) !important;
+            color: #FBBF24 !important;
+            border-color: rgba(245,158,11,.24) !important;
+        }
+
+        .sw-signal.signal-neutral {
+            background: #18222D !important;
+            color: #AEB8C4 !important;
+            border-color: #29333E !important;
+        }
+
+        .sw-signal.signal-ready {
+            background: rgba(168,85,247,.12) !important;
+            color: #D8B4FE !important;
+            border-color: rgba(168,85,247,.24) !important;
+        }
+
+        /* -------- Native Watchlist/filter controls -------- */
+        [data-testid="stMainBlockContainer"] [data-testid="stBaseButton-secondary"],
+        [data-testid="stMainBlockContainer"] [data-testid="stPageLink"] a {
+            background: #131B24 !important;
+            background-color: #131B24 !important;
+            color: #EDF2F7 !important;
+            border-color: #29333E !important;
+            box-shadow: none !important;
+        }
+
+        [data-testid="stMainBlockContainer"] [data-testid="stBaseButton-secondary"] *,
+        [data-testid="stMainBlockContainer"] [data-testid="stPageLink"] a * {
+            color: #EDF2F7 !important;
+            -webkit-text-fill-color: #EDF2F7 !important;
+        }
+
+        [data-testid="stMainBlockContainer"] [data-testid="stBaseButton-secondary"]:hover,
+        [data-testid="stMainBlockContainer"] [data-testid="stPageLink"] a:hover {
+            background: #18222D !important;
+            background-color: #18222D !important;
+            border-color: rgba(98,166,201,.55) !important;
+        }
+
+        [data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+        [data-testid="stMultiSelect"] div[data-baseweb="select"] > div,
+        [data-testid="stMainBlockContainer"] div[data-baseweb="select"] > div {
+            background: #131B24 !important;
+            background-color: #131B24 !important;
+            color: #EDF2F7 !important;
+            border-color: #29333E !important;
+        }
+
+        [data-testid="stSelectbox"] div[data-baseweb="select"] *,
+        [data-testid="stMultiSelect"] div[data-baseweb="select"] *,
+        [data-testid="stMainBlockContainer"] div[data-baseweb="select"] * {
+            color: #EDF2F7 !important;
+            -webkit-text-fill-color: #EDF2F7 !important;
+        }
+
+        [data-testid="stMultiSelect"] [data-baseweb="tag"] {
+            background: #1A2632 !important;
+            color: #EDF2F7 !important;
+            border-color: #33404D !important;
+        }
+
+        div[data-baseweb="popover"],
+        div[data-baseweb="menu"],
+        ul[role="listbox"] {
+            background: #131B24 !important;
+            background-color: #131B24 !important;
+            color: #EDF2F7 !important;
+        }
+
+        div[data-baseweb="popover"] li,
+        div[data-baseweb="menu"] li,
+        ul[role="listbox"] li,
+        [role="option"] {
+            background: #131B24 !important;
+            background-color: #131B24 !important;
+            color: #EDF2F7 !important;
+            -webkit-text-fill-color: #EDF2F7 !important;
+        }
+
+        div[data-baseweb="popover"] li:hover,
+        div[data-baseweb="menu"] li:hover,
+        [role="option"]:hover,
+        [role="option"][aria-selected="true"] {
+            background: #1A2632 !important;
+            background-color: #1A2632 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def apply_style() -> None:
+    _v32940_base_apply_style()
+    _v32940_watchlist_dark_overlay()

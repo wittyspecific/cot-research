@@ -266,30 +266,26 @@ def test_analog_engine_returns_spaced_historical_matches():
     )
 
 
-def test_navigation_places_analog_then_fx_between_macro_and_market_regime():
-    text = APP.read_text(encoding="utf-8")
-    research = _research_items(text)
-
-    macro = next(
-        i for i, item in enumerate(research)
-        if "pages/macro_model_library.py" in item
-    )
-    analog = next(
-        i for i, item in enumerate(research)
-        if "pages/cot_price_analog.py" in item
-    )
-    fx_analog = next(
-        i for i, item in enumerate(research)
-        if "pages/fx_relative_cot_analog.py" in item
-    )
-    market = next(
-        i for i, item in enumerate(research)
-        if "pages/market_regime.py" in item
-    )
-
-    assert analog == macro + 1
-    assert fx_analog == analog + 1
-    assert market == fx_analog + 1
+def test_navigation_places_macro_cot_then_analog_then_fx_between_macro_and_market():
+    from pathlib import Path
+    import ast
+    app = Path(__file__).resolve().parents[1] / "app.py"
+    text = app.read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    research = None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        for key, value in zip(node.keys, node.values):
+            if isinstance(key, ast.Constant) and key.value == "RESEARCH" and isinstance(value, ast.List):
+                research = value
+    assert research is not None
+    paths = []
+    for item in research.elts:
+        for child in ast.walk(item):
+            if isinstance(child, ast.Constant) and isinstance(child.value, str) and child.value.startswith("pages/"):
+                paths.append(child.value); break
+    assert paths == ["pages/opportunity_scanner.py", "pages/market_analysis_hub.py", "pages/currency_strength_hub.py", "pages/macro_regime.py"]
 
 
 

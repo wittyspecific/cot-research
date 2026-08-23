@@ -137,7 +137,7 @@ with left:
 with right:
     section_line("Schnellzugriff", "")
     st.page_link("pages/trade_planner.py", label="＋ Neuen Trade planen", icon=":material/add_circle:", use_container_width=True)
-    st.page_link("pages/watchlist.py", label="Research Watchlist öffnen", icon=":material/radar:", use_container_width=True)
-    st.page_link("pages/intermarket.py", label="Intermarket öffnen", icon=":material/hub:", use_container_width=True)
-    st.page_link("pages/forex_matrix.py", label="Währungsstärke öffnen", icon=":material/currency_exchange:", use_container_width=True)
+    st.page_link("pages/opportunity_scanner.py", label="Opportunity Scanner öffnen", icon=":material/radar:", use_container_width=True)
+    st.page_link("pages/market_analysis_hub.py", label="Marktanalyse öffnen", icon=":material/hub:", use_container_width=True)
+    st.page_link("pages/currency_strength_hub.py", label="Währungsstärke öffnen", icon=":material/currency_exchange:", use_container_width=True)
 

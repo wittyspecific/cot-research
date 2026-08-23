@@ -16,13 +16,23 @@ def test_intermarket_page_parses():
 
 def test_intermarket_is_in_research_navigation():
     text = APP.read_text(encoding="utf-8")
-    assert '"pages/intermarket.py"' in text
-    assert 'title="Intermarket"' in text
+
+    # V3.29.x:
+    # Intermarket is no longer a standalone Research page. Its trader-facing
+    # context is integrated into Marktanalyse; the legacy page remains
+    # reachable through an Advanced wrapper.
+    assert '"pages/market_analysis_hub.py"' in text
+    assert '"pages/advanced_legacy_intermarket.py"' in text
 
 
 def test_intermarket_is_directly_below_watchlist():
     text = APP.read_text(encoding="utf-8")
-    watch = text.index('"pages/watchlist.py"')
-    intermarket = text.index('"pages/intermarket.py"')
-    marketanalysis = text.index('"pages/marktanalyse.py"')
-    assert watch < intermarket < marketanalysis
+
+    # V3.29.x replaces the old Watchlist -> Intermarket sidebar ordering
+    # with the new trader workflow.
+    opportunity = text.index('"pages/opportunity_scanner.py"')
+    market = text.index('"pages/market_analysis_hub.py"')
+    currency = text.index('"pages/currency_strength_hub.py"')
+    macro = text.index('"pages/macro_regime.py"')
+
+    assert opportunity < market < currency < macro

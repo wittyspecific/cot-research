@@ -32,6 +32,7 @@ from .features import (
 from .historical_validation import evaluate_historical_cycle
 from .imminent_recession import evaluate_imminent_recession
 from .liquidity import evaluate_liquidity
+from .transition_models import evaluate_transition_layer
 from .types import MacroNavigationResult
 
 
@@ -166,6 +167,12 @@ class MacroModelLibrary:
             weekly_raw,
             features,
             self.config,
+        )
+
+        transition_layer = evaluate_transition_layer(
+            series_map=series_map,
+            cycle_history=cycle_history,
+            weekly_scores=weekly_scores,
         )
 
         historical_validation = evaluate_historical_cycle(
@@ -317,6 +324,8 @@ class MacroModelLibrary:
             imminent_recession=imminent,
             model_breadth=breadth,
             liquidity_modifier=liquidity,
+            transition_models=transition_layer["transitions"],
+            macro_families=transition_layer["families"],
             atomic_models=[x.to_dict() for x in atomic],
             family_consensus=family_votes,
             cycle_history=history_records,

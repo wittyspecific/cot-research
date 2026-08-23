@@ -29,11 +29,17 @@ def test_trade_status_remains_removed():
 
 def test_intermarket_before_currency_strength():
     text = DASH.read_text(encoding="utf-8")
-    assert text.index(
-        'st.page_link("pages/intermarket.py"'
-    ) < text.index(
-        'st.page_link("pages/forex_matrix.py"'
+
+    # V3.29.x: Market Context/Intermarket lives in the consolidated
+    # Marktanalyse hub, which remains before Währungsstärke.
+    market = text.index(
+        'st.page_link("pages/market_analysis_hub.py"'
     )
+    currency = text.index(
+        'st.page_link("pages/currency_strength_hub.py"'
+    )
+
+    assert market < currency
 
 
 def test_watchlist_is_not_modified_by_dashboard_cleanup():

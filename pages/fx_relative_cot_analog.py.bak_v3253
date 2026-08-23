@@ -1,0 +1,849 @@
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+import streamlit as st
+
+try:
+    import plotly.express as px
+except ImportError:  # pragma: no cover
+    px = None
+
+from src.cftc_reports import (
+    DATASETS,
+    load_report_history,
+    load_report_universe,
+    primary_report_for_asset_class,
+    resolve_report_market,
+)
+from src.fx_relative_cot_analog import (
+    FX_PAIRS,
+    TFF_GROUPS,
+    analyze_fx_relative_analogs,
+    normalized_fx_paths,
+)
+from src.markets import CLASSIC_MARKETS
+from src.prices import load_prices
+from src.report_analysis import enrich_report_positioning
+from src.style import (
+    apply_style,
+    context_strip,
+    metric_card,
+    page_header,
+    section_line,
+)
+
+
+apply_style()
+
+
+CURRENCY_ALIASES = {
+    "EUR": ("EURO FX", "EURO"),
+    "GBP": ("BRITISH POUND", "POUND"),
+    "AUD": ("AUSTRALIAN DOLLAR", "AUSTRALIAN"),
+    "NZD": ("NEW ZEALAND DOLLAR", "NEW ZEALAND"),
+    "JPY": ("JAPANESE YEN", "YEN"),
+    "CHF": ("SWISS FRANC", "SWISS"),
+    "CAD": ("CANADIAN DOLLAR", "CANADIAN"),
+}
+
+
+def _finite(value):
+    try:
+        value = float(
+            value
+        )
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return np.nan
+
+    return (
+        value
+        if np.isfinite(
+            value
+        )
+        else np.nan
+    )
+
+
+def _pct(value, digits=1):
+    value = _finite(
+        value
+    )
+    return (
+        "—"
+        if not np.isfinite(
+            value
+        )
+        else f"{value:+.{digits}%}"
+    )
+
+
+def _sim(value):
+    value = _finite(
+        value
+    )
+    return (
+        "—"
+        if not np.isfinite(
+            value
+        )
+        else f"{value:.0f}%"
+    )
+
+
+def _find_currency_market(
+    currency: str,
+) -> dict | None:
+    if currency == "USD":
+        return None
+
+    markets = CLASSIC_MARKETS.get(
+        "Currencies",
+        [],
+    )
+
+    aliases = CURRENCY_ALIASES.get(
+        currency,
+        (),
+    )
+
+    for alias in aliases:
+        for market in markets:
+            name = str(
+                market.get(
+                    "name",
+                    ""
+                )
+            ).upper()
+
+            if alias in name:
+                return market
+
+    return None
+
+
+@st.cache_data(
+    ttl=3600,
+    show_spinner=False,
+)
+def _load_currency_cot(
+    currency: str,
+    report_type: str,
+):
+    market = _find_currency_market(
+        currency
+    )
+
+    if market is None:
+        return (
+            pd.DataFrame(),
+            None,
+        )
+
+    universe = load_report_universe(
+        report_type
+    )
+
+    resolved = resolve_report_market(
+        market,
+        universe,
+    )
+
+    if not resolved:
+        return (
+            pd.DataFrame(),
+            None,
+        )
+
+    raw = load_report_history(
+        report_type,
+        resolved[
+            "cftc_contract_market_code"
+        ],
+    )
+
+    if (
+        raw is None
+        or raw.empty
+    ):
+        return (
+            pd.DataFrame(),
+            resolved,
+        )
+
+    enriched = enrich_report_positioning(
+        raw,
+        report_type=report_type,
+        index_weeks=26,
+        validation_weeks=156,
+    )
+
+    return (
+        enriched,
+        resolved,
+    )
+
+
+page_header(
+    "Research · FX Relative COT",
+    "FX Relative COT Historical Analog",
+    "28 FX-Paare aus EUR, GBP, AUD, NZD, JPY, CHF, CAD und USD · relative COT-Struktur beider Währungs-Legs plus tatsächlicher FX-Preis",
+    "V3.25.2 · FX RELATIVE COT ANALOG · CAD",
+)
+
+st.caption(
+    "Eigenständige Research-Seite. Das bestehende COT × Price Analog Lab wird nicht verändert. "
+    "Crosses verwenden Base-COT minus Quote-COT. Bei XXXUSD wird nur der XXX-Future in Paar-Richtung verwendet; "
+    "bei USDXXX wird der XXX-Future invertiert. Ein DXY-COT wird nicht künstlich als bilaterales USD-Leg erzwungen."
+)
+
+with st.container(
+    border=True
+):
+    c1, c2, c3 = st.columns(
+        [
+            1.2,
+            0.8,
+            0.8,
+        ],
+        gap="small",
+    )
+
+    with c1:
+        pair = st.selectbox(
+            "FX-Paar",
+            list(
+                FX_PAIRS.keys()
+            ),
+            index=0,
+            key="fx_relative_analog_pair",
+        )
+
+    with c2:
+        top_n = st.selectbox(
+            "Matches",
+            [
+                5,
+                8,
+                10,
+                12,
+            ],
+            index=1,
+        )
+
+    with c3:
+        horizon = st.selectbox(
+            "Outcome",
+            [
+                4,
+                8,
+                12,
+            ],
+            index=1,
+            format_func=lambda x: (
+                f"{x}W"
+            ),
+        )
+
+spec = FX_PAIRS[
+    pair
+]
+base = spec[
+    "base"
+]
+quote = spec[
+    "quote"
+]
+ticker = spec[
+    "ticker"
+]
+
+price_start = (
+    pd.Timestamp.today()
+    .normalize()
+    - pd.DateOffset(
+        years=35
+    )
+)
+
+with st.spinner(
+    f"{pair}: FX-Preis und relative COT-Historie werden geladen …"
+):
+    prices = load_prices(
+        ticker,
+        start=price_start,
+    )
+
+if (
+    prices is None
+    or prices.empty
+):
+    st.error(
+        f"Keine Preisreihe für {pair} ({ticker}) verfügbar."
+    )
+    st.stop()
+
+report_type = primary_report_for_asset_class(
+    "Currencies"
+)
+
+if report_type != "tff":
+    st.warning(
+        f"Currency Primary Report ist aktuell '{report_type}'. "
+        "Die Relative-FX-Engine erwartet TFF-Gruppen."
+    )
+
+base_cot = pd.DataFrame()
+quote_cot = pd.DataFrame()
+base_resolved = None
+quote_resolved = None
+
+try:
+    if base != "USD":
+        (
+            base_cot,
+            base_resolved,
+        ) = _load_currency_cot(
+            base,
+            report_type,
+        )
+
+    if quote != "USD":
+        (
+            quote_cot,
+            quote_resolved,
+        ) = _load_currency_cot(
+            quote,
+            report_type,
+        )
+except Exception as exc:
+    st.error(
+        "COT-Daten konnten für das FX-Paar nicht geladen werden."
+    )
+    st.caption(
+        f"{type(exc).__name__}: {exc}"
+    )
+    st.stop()
+
+if (
+    base != "USD"
+    and base_cot.empty
+):
+    st.error(
+        f"Keine COT-Historie für {base} gefunden."
+    )
+    st.stop()
+
+if (
+    quote != "USD"
+    and quote_cot.empty
+):
+    st.error(
+        f"Keine COT-Historie für {quote} gefunden."
+    )
+    st.stop()
+
+result = analyze_fx_relative_analogs(
+    prices,
+    pair=pair,
+    base_cot=base_cot,
+    quote_cot=quote_cot,
+    top_n=int(
+        top_n
+    ),
+    min_spacing_weeks=13,
+    exclude_recent_weeks=26,
+    outcome_horizon_weeks=int(
+        horizon
+    ),
+)
+
+if not result.get(
+    "available"
+):
+    st.warning(
+        result.get(
+            "reason",
+            "Keine FX-Analogs verfügbar.",
+        )
+    )
+    st.stop()
+
+current = result[
+    "current"
+]
+matches = result[
+    "matches"
+].copy()
+aggregate = result[
+    "aggregate"
+]
+
+context_strip(
+    [
+        (
+            "FX-Paar",
+            pair,
+        ),
+        (
+            "Preis-Proxy",
+            ticker,
+        ),
+        (
+            "COT-Report",
+            DATASETS.get(
+                report_type,
+                {},
+            ).get(
+                "label",
+                report_type,
+            ),
+        ),
+        (
+            "Aktueller COT Snapshot",
+            pd.Timestamp(
+                current[
+                    "report_date"
+                ]
+            ).date().isoformat(),
+        ),
+        (
+            "Verfügbar seit",
+            pd.Timestamp(
+                current[
+                    "availability_date"
+                ]
+            ).date().isoformat(),
+        ),
+    ]
+)
+
+
+section_line(
+    "1 · Relative FX Setup",
+    "positive Werte = Positionierung / Flow unterstützt Base-Währung relativ zur Quote-Währung",
+)
+
+p1, p2, p3, p4 = st.columns(
+    4
+)
+
+with p1:
+    metric_card(
+        "PRICE 4W",
+        _pct(
+            current.get(
+                "price_return_4w"
+            )
+        ),
+        f"{pair} · {current.get('close', np.nan):,.4f}",
+    )
+
+with p2:
+    metric_card(
+        "PRICE 13W",
+        _pct(
+            current.get(
+                "price_return_13w"
+            )
+        ),
+        "mittelfristige Paarbewegung",
+    )
+
+with p3:
+    metric_card(
+        "DRAWDOWN 26W",
+        _pct(
+            current.get(
+                "price_drawdown_26w"
+            )
+        ),
+        "Abstand zum 26W-Hoch",
+    )
+
+with p4:
+    metric_card(
+        "VS. MA26",
+        _pct(
+            current.get(
+                "price_vs_ma26"
+            )
+        ),
+        "Paar relativ zum 26W-Mittel",
+    )
+
+rows = []
+
+for group in current.get(
+    "groups",
+    [],
+):
+    rel_pct = _finite(
+        group.get(
+            "relative_percentile"
+        )
+    )
+
+    rows.append(
+        {
+            "Gruppe": group[
+                "group"
+            ],
+            "Rolle": group[
+                "role"
+            ],
+            "Relative Net/OI": group.get(
+                "relative_net_oi"
+            ),
+            "Relative Position": rel_pct,
+            "1W Relative Flow": group.get(
+                "relative_delta_1w"
+            ),
+            "2W Relative Flow": group.get(
+                "relative_delta_2w"
+            ),
+            "4W Relative Flow": group.get(
+                "relative_delta_4w"
+            ),
+        }
+    )
+
+relative_frame = pd.DataFrame(
+    rows
+)
+
+st.dataframe(
+    relative_frame.style.format(
+        {
+            "Relative Net/OI": "{:+.2%}",
+            "Relative Position": "{:+.2f}",
+            "1W Relative Flow": "{:+.2%}",
+            "2W Relative Flow": "{:+.2%}",
+            "4W Relative Flow": "{:+.2%}",
+        },
+        na_rep="—",
+    ),
+    use_container_width=True,
+    hide_index=True,
+)
+
+if base == "USD":
+    st.caption(
+        f"USD ist die Base-Währung. Deshalb wird der {quote}-Future für {pair} invertiert: "
+        f"bullisher {quote}-COT = bearisher {pair}-Impuls."
+    )
+elif quote == "USD":
+    st.caption(
+        f"USD ist die Quote-Währung. Der {base}-Future ist bereits gegen USD ausgedrückt und wird direkt in {pair}-Richtung verwendet."
+    )
+else:
+    st.caption(
+        f"{pair}: Relative COT = {base}-COT minus {quote}-COT. "
+        "Positive Relative-Werte unterstützen die Base-Währung; negative Werte die Quote-Währung."
+    )
+
+st.caption(
+    "Dealer / Intermediary bleibt Intermediary-Kontext und wird nicht als Producer/Commercial Hedger interpretiert. "
+    "Nonreportables bleiben residualer/konträrer Kontext und werden nicht als faktisches Retail bezeichnet."
+)
+
+
+section_line(
+    "2 · Closest FX Historical Analogs",
+    "50% tatsächliche Paar-Preisstruktur · 25% relative COT-Level · 25% relative COT-Flow",
+)
+
+top_cols = st.columns(
+    min(
+        3,
+        len(
+            matches
+        ),
+    )
+)
+
+for col, (_, row) in zip(
+    top_cols,
+    matches.head(
+        3
+    ).iterrows(),
+):
+    with col:
+        metric_card(
+            (
+                f"#{int(row['rank'])} · "
+                f"{pd.Timestamp(row['availability_date']).date().isoformat()}"
+            ),
+            _sim(
+                row.get(
+                    "similarity"
+                )
+            ),
+            (
+                f"{horizon}W "
+                f"{_pct(row.get(f'return_{horizon}w'))}"
+            ),
+        )
+
+show = matches.copy()
+show[
+    "Analog"
+] = pd.to_datetime(
+    show[
+        "availability_date"
+    ],
+    errors="coerce",
+).dt.date.astype(
+    str
+)
+
+show = show.rename(
+    columns={
+        "rank": "#",
+        "similarity": "Similarity",
+        "price_similarity": "Pair Price",
+        "relative_cot_level_similarity": "Relative COT Level",
+        "relative_cot_flow_similarity": "Relative COT Flow",
+        "return_2w": "+2W",
+        "return_4w": "+4W",
+        "return_8w": "+8W",
+        "return_12w": "+12W",
+        "downside_excursion": f"Downside {horizon}W",
+        "upside_excursion": f"Upside {horizon}W",
+    }
+)
+
+cols = [
+    "#",
+    "Analog",
+    "Similarity",
+    "Pair Price",
+    "Relative COT Level",
+    "Relative COT Flow",
+    "+2W",
+    "+4W",
+    "+8W",
+    "+12W",
+    f"Downside {horizon}W",
+    f"Upside {horizon}W",
+]
+
+st.dataframe(
+    show[
+        [
+            col
+            for col in cols
+            if col
+            in show.columns
+        ]
+    ].style.format(
+        {
+            "Similarity": "{:.0f}%",
+            "Pair Price": "{:.0f}%",
+            "Relative COT Level": "{:.0f}%",
+            "Relative COT Flow": "{:.0f}%",
+            "+2W": "{:+.1%}",
+            "+4W": "{:+.1%}",
+            "+8W": "{:+.1%}",
+            "+12W": "{:+.1%}",
+            f"Downside {horizon}W": "{:+.1%}",
+            f"Upside {horizon}W": "{:+.1%}",
+        },
+        na_rep="—",
+    ),
+    use_container_width=True,
+    hide_index=True,
+)
+
+
+section_line(
+    "3 · Simple Historical Read",
+    f"Wie oft war {pair} nach {horizon} Wochen höher bzw. tiefer?",
+)
+
+r1, r2, r3, r4 = st.columns(
+    4
+)
+
+with r1:
+    metric_card(
+        "MATCHES",
+        str(
+            aggregate.get(
+                "outcomes_available",
+                0,
+            )
+        ),
+        aggregate.get(
+            "sample_quality",
+            "N/V",
+        ),
+    )
+
+with r2:
+    metric_card(
+        f"{horizon}W OUTCOMES",
+        (
+            f"{aggregate.get('bullish_count', 0)}× bullish · "
+            f"{aggregate.get('bearish_count', 0)}× bearish"
+        ),
+        "ungewichtete historische Fälle",
+    )
+
+with r3:
+    metric_card(
+        f"MEDIAN {horizon}W",
+        _pct(
+            aggregate.get(
+                "median_return"
+            )
+        ),
+        f"Evidence {aggregate.get('bias', 'MIXED')}",
+    )
+
+with r4:
+    metric_card(
+        "MEDIAN SIMILARITY",
+        _sim(
+            aggregate.get(
+                "median_similarity"
+            )
+        ),
+        "ausgewählte unabhängige Analogs",
+    )
+
+e1, e2 = st.columns(
+    2
+)
+
+with e1:
+    metric_card(
+        f"MEDIAN DOWNSIDE {horizon}W",
+        _pct(
+            aggregate.get(
+                "median_downside_excursion"
+            )
+        ),
+        "größte typische Abwärtsbewegung",
+    )
+
+with e2:
+    metric_card(
+        f"MEDIAN UPSIDE {horizon}W",
+        _pct(
+            aggregate.get(
+                "median_upside_excursion"
+            )
+        ),
+        "größte typische Aufwärtsbewegung",
+    )
+
+st.info(
+    f"**{pair} · {horizon}W:** "
+    f"{aggregate.get('outcomes_available', 0)} ähnliche historische FX-Setups, "
+    f"davon **{aggregate.get('bullish_count', 0)}× bullish** und "
+    f"**{aggregate.get('bearish_count', 0)}× bearish**. "
+    f"Median: **{_pct(aggregate.get('median_return'))}**. "
+    "Das ist historische Evidence und keine kalibrierte Trade-Wahrscheinlichkeit."
+)
+
+
+section_line(
+    "4 · FX Price Path Comparison",
+    "Current 13W Lookback vs. Top-3 relative FX Analogs",
+)
+
+path_frame = normalized_fx_paths(
+    prices,
+    current_anchor=pd.Timestamp(
+        current[
+            "availability_date"
+        ]
+    ),
+    historical_anchors=[
+        pd.Timestamp(
+            value
+        )
+        for value in matches[
+            "availability_date"
+        ].head(
+            3
+        )
+    ],
+    lookback_weeks=13,
+    forward_weeks=int(
+        horizon
+    ),
+)
+
+if not path_frame.empty:
+    if px is not None:
+        fig = px.line(
+            path_frame,
+            x="relative_day",
+            y="normalized",
+            color="analog",
+            labels={
+                "relative_day": "Tage relativ zum Setup",
+                "normalized": f"{pair} indexiert auf Setup = 100",
+                "analog": "Setup",
+            },
+        )
+
+        fig.add_vline(
+            x=0,
+            line_dash="dash",
+            line_width=1,
+        )
+
+        fig.update_layout(
+            height=500,
+            margin=dict(
+                l=10,
+                r=10,
+                t=15,
+                b=10,
+            ),
+        )
+
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            config={
+                "displaylogo": False,
+            },
+        )
+    else:
+        pivot = path_frame.pivot_table(
+            index="relative_day",
+            columns="analog",
+            values="normalized",
+            aggfunc="last",
+        )
+        st.line_chart(
+            pivot,
+            use_container_width=True,
+        )
+
+
+section_line(
+    "5 · Methodik / Grenzen",
+    "relative FX-COT-Analogs bleiben eine Research-Schicht",
+)
+
+st.markdown(
+    """
+- **28 Paare:** EUR, GBP, AUD, NZD, JPY, CHF, CAD und USD werden zu allen 28 eindeutigen Crosses kombiniert.
+- **Crosses:** Bei z. B. EURJPY wird die EUR-TFF-Struktur gegen die JPY-TFF-Struktur gestellt.
+- **USD-Paare:** Kein künstlicher DXY-COT. EURUSD verwendet den EUR-Future direkt; USDJPY invertiert den JPY-Future.
+- **COT-Verfügbarkeit:** Tuesday Positioning wird konservativ erst `+3 Kalendertage` als verfügbar behandelt.
+- **Relative COT-Level:** Net/OI und historisch zentrierte Positionierungs-Percentiles werden in Paar-Richtung verglichen.
+- **Relative COT-Flow:** 1W/2W/4W-Net/OI-Veränderungen der beiden Legs werden gegeneinander gestellt.
+- **Preis:** Das tatsächliche FX-Paar liefert 4W/8W/13W/26W Returns, Drawdown, MA13/MA26-Abstand und Volatilität.
+- **Unabhängigere Matches:** mindestens 13 Wochen Abstand; letzte 26 Wochen sind keine historischen Kandidaten.
+- **Keine Gewinnwahrscheinlichkeit:** `6× bullish / 2× bearish` beschreibt nur die ausgewählten historischen Fälle.
+"""
+)

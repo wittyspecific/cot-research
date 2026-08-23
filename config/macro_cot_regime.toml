@@ -1,0 +1,178 @@
+# V3.27.1 · Macro × COT Regime + Treasury Duration COT
+# Central scoring / breadth configuration. UI contains no duplicate weights.
+
+[cot]
+min_history_weeks = 52
+percentile_window_weeks = 156
+percentile_min_weeks = 52
+level_weight = 0.40
+flow_weight = 0.60
+unwind_factor = 0.60
+flow_scale_net_oi = 0.02
+direction_neutral_threshold = 8.0
+state_directional_threshold = 18.0
+state_very_threshold = 55.0
+
+[cot.flow_weights]
+"1w" = 0.15
+"2w" = 0.35
+"4w" = 0.50
+
+[macro]
+slope_scale = 20.0
+acceleration_scale = 15.0
+momentum_improving_threshold = 20.0
+momentum_deteriorating_threshold = -20.0
+
+[transition_pressure.weights]
+cot_persistence = 0.30
+cross_asset_breadth = 0.25
+macro_momentum = 0.20
+leading_breadth = 0.15
+financial_market_confirmation = 0.10
+
+[rates]
+# Treasury tenors are aggregated once into a synthetic duration regime.
+# Individual tenor weights below are used only inside the rates basket.
+basket_weight = 1.25
+minimum_coverage = 0.50
+breadth_lean = 0.45
+breadth_strong = 0.60
+persistence_threshold = 0.65
+active_build_threshold = 0.55
+
+[rates.contract_weights]
+treasury2y = 0.30
+treasury5y = 0.25
+treasury10y = 0.25
+treasury30y = 0.20
+
+[state_machine]
+minimum_cross_asset_coverage = 0.50
+lean_breadth = 0.45
+strong_breadth = 0.60
+watch_pressure = 40.0
+elevated_pressure = 60.0
+
+# risk_off_when = contract direction that confirms Risk-Off.
+# ASSET_SPECIFIC excludes the asset from cross-asset breadth.
+
+[assets.sp500]
+label = "S&P 500"
+asset_class = "Indices"
+aliases = ["E-MINI S&P 500", "S&P 500", "S&P"]
+risk_off_when = "BEARISH"
+weight = 1.50
+opportunity_group = "EQUITY"
+
+[assets.dow]
+label = "Dow Jones"
+asset_class = "Indices"
+aliases = ["DOW JONES", "DJIA", "DOW"]
+risk_off_when = "BEARISH"
+weight = 1.25
+opportunity_group = "EQUITY"
+
+[assets.nasdaq]
+label = "Nasdaq"
+asset_class = "Indices"
+aliases = ["NASDAQ-100", "NASDAQ 100", "NASDAQ"]
+risk_off_when = "BEARISH"
+weight = 1.10
+opportunity_group = "EQUITY"
+
+[assets.jpy]
+label = "JPY"
+asset_class = "Currencies"
+aliases = ["JAPANESE YEN", "YEN"]
+risk_off_when = "BULLISH"
+weight = 1.35
+opportunity_group = "SAFE_HAVEN"
+
+[assets.chf]
+label = "CHF"
+asset_class = "Currencies"
+aliases = ["SWISS FRANC", "SWISS"]
+risk_off_when = "BULLISH"
+weight = 1.20
+opportunity_group = "SAFE_HAVEN"
+
+[assets.treasury2y]
+label = "US 2Y Treasury"
+asset_class = "Rates"
+aliases = ["2-YEAR U.S. TREASURY NOTES", "2-YEAR U.S. TREASURY NOTE", "2-YEAR TREASURY NOTE", "2-YEAR T-NOTE"]
+risk_off_when = "BULLISH"
+weight = 0.0
+opportunity_group = "RATES_CURVE"
+
+[assets.treasury5y]
+label = "US 5Y Treasury"
+asset_class = "Rates"
+aliases = ["5-YEAR U.S. TREASURY NOTES", "5-YEAR U.S. TREASURY NOTE", "5-YEAR TREASURY NOTE", "5-YEAR T-NOTE"]
+risk_off_when = "BULLISH"
+weight = 0.0
+opportunity_group = "RATES_CURVE"
+
+[assets.treasury10y]
+label = "US 10Y Treasury"
+asset_class = "Rates"
+aliases = ["10-YEAR U.S. TREASURY NOTES", "10-YEAR U.S. TREASURY NOTE", "10-YEAR U.S. TREASURY", "10-YEAR TREASURY NOTE", "10-YEAR T-NOTE"]
+risk_off_when = "BULLISH"
+weight = 0.0
+opportunity_group = "RATES_CURVE"
+
+[assets.treasury30y]
+label = "US 30Y Treasury"
+asset_class = "Rates"
+aliases = ["U.S. TREASURY BONDS", "30-YEAR U.S. TREASURY BONDS", "30-YEAR TREASURY BOND", "30-YEAR T-BOND"]
+risk_off_when = "BULLISH"
+weight = 0.0
+opportunity_group = "RATES_CURVE"
+
+[assets.gold]
+label = "Gold"
+asset_class = "Metals"
+aliases = ["GOLD"]
+risk_off_when = "BULLISH"
+weight = 0.65
+opportunity_group = "METAL"
+
+[assets.copper]
+label = "Copper"
+asset_class = "Metals"
+aliases = ["COPPER"]
+risk_off_when = "BEARISH"
+weight = 0.75
+opportunity_group = "GROWTH_COMMODITY"
+
+[assets.crude]
+label = "Crude Oil"
+asset_class = "Energy"
+aliases = ["CRUDE OIL", "WTI"]
+risk_off_when = "BEARISH"
+weight = 0.65
+opportunity_group = "GROWTH_COMMODITY"
+
+[assets.cotton]
+label = "Cotton"
+asset_class = "Soft Commodities"
+aliases = ["COTTON"]
+risk_off_when = "BEARISH"
+weight = 0.35
+opportunity_group = "GROWTH_COMMODITY"
+
+[assets.wheat]
+label = "Wheat"
+asset_class = "Grains"
+aliases = ["WHEAT"]
+risk_off_when = "ASSET_SPECIFIC"
+weight = 0.0
+opportunity_group = "AGRICULTURE"
+
+[assets.natural_gas]
+label = "Natural Gas"
+asset_class = "Energy"
+aliases = ["NATURAL GAS"]
+risk_off_when = "ASSET_SPECIFIC"
+weight = 0.0
+opportunity_group = "ENERGY_IDIOSYNCRATIC"

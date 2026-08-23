@@ -97,15 +97,18 @@ def test_freshness_gate():
 def test_navigation_places_yield_spreads_after_currency_strength():
     text = APP.read_text(encoding="utf-8")
     tree = ast.parse(text)
+
     pages_assign = next(
         (
-            node for node in tree.body
+            node
+            for node in tree.body
             if isinstance(node, (ast.Assign, ast.AnnAssign))
             and (
                 (
                     isinstance(node, ast.Assign)
                     and any(
-                        isinstance(target, ast.Name) and target.id == "pages"
+                        isinstance(target, ast.Name)
+                        and target.id == "pages"
                         for target in node.targets
                     )
                 )
@@ -118,27 +121,46 @@ def test_navigation_places_yield_spreads_after_currency_strength():
         ),
         None,
     )
-    assert pages_assign is not None
-    research = None
-    for key, value in zip(pages_assign.value.keys, pages_assign.value.values):
-        if isinstance(key, ast.Constant) and key.value == "RESEARCH":
-            research = value
-            break
-    assert isinstance(research, ast.List)
 
-    segments = [ast.get_source_segment(text, element) or "" for element in research.elts]
-    yield_idx = next(i for i, s in enumerate(segments) if "pages/yield_spreads.py" in s)
-    currency_idx = next(
-        i for i, s in enumerate(segments)
+    assert pages_assign is not None
+
+    sections = {}
+
+    for key, value in zip(
+        pages_assign.value.keys,
+        pages_assign.value.values,
+    ):
         if (
-            "Währungsstärke" in s
-            or "Waehrungsstaerke" in s
-            or "waehrungsstaerke" in s
-            or "waehrungsstärke" in s
-            or "currency_strength" in s
-        )
+            isinstance(key, ast.Constant)
+            and isinstance(key.value, str)
+            and isinstance(value, ast.List)
+        ):
+            sections[key.value] = [
+                ast.get_source_segment(text, element) or ""
+                for element in value.elts
+            ]
+
+    research = sections["RESEARCH"]
+    advanced = sections["ADVANCED"]
+
+    # V3.29.x Research is intentionally reduced to four core pages.
+    assert any(
+        "pages/currency_strength_hub.py" in item
+        for item in research
     )
-    assert yield_idx == currency_idx + 1
+    assert not any(
+        "pages/yield_spreads.py" in item
+        for item in research
+    )
+
+    # Yield Spreads remains preserved as diagnostic/Advanced functionality.
+    assert any(
+        (
+            "pages/yield_spreads.py" in item
+            or "advanced_legacy_yield_spreads.py" in item
+        )
+        for item in advanced
+    )
 
 
 def test_page_is_research_only():

@@ -28,7 +28,7 @@ page_header(
     "Research · Macro",
     "Makro Model Library",
     "Business Cycle Core · Sequencing · Imminent Recession · Breadth · Liquidity Modifier",
-    "V3.24.2 · CONTRACTION CALIBRATION LAB",
+    "V3.26.0 · TRANSITION & MACRO FAMILIES",
 )
 
 st.caption(
@@ -206,6 +206,259 @@ elif divergence == "EXPECTED_RECOVERY_DIVERGENCE":
     st.info(
         "Leading verbessert sich vor Coincident: Das ist eine erwartete Recovery-Sequenz."
     )
+
+
+
+section_line(
+    "1b · Transition Models & Macro Families",
+    "Housing → Labor → Household · Coincident → US 2Y · Research only, kein zusätzlicher Cycle Vote",
+)
+
+transition_models = result.get(
+    "transition_models",
+    {},
+)
+
+macro_families = result.get(
+    "macro_families",
+    {},
+)
+
+tf1, tf2, tf3 = st.columns(
+    3
+)
+
+for column, key, label in (
+    (
+        tf1,
+        "labor_quality",
+        "LABOR QUALITY",
+    ),
+    (
+        tf2,
+        "housing_activity",
+        "HOUSING ACTIVITY",
+    ),
+    (
+        tf3,
+        "household_resilience",
+        "HOUSEHOLD RESILIENCE",
+    ),
+):
+    family_item = macro_families.get(
+        key,
+        {},
+    )
+
+    positive = family_item.get(
+        "positive_breadth"
+    )
+
+    with column:
+        metric_card(
+            label,
+            family_item.get(
+                "state",
+                "N/V",
+            ),
+            (
+                f"positive breadth {positive:.0%}"
+                if positive is not None
+                else "nicht genügend Daten"
+            ),
+        )
+
+tt1, tt2, tt3 = st.columns(
+    3
+)
+
+for column, key, label in (
+    (
+        tt1,
+        "housing_to_labor",
+        "HOUSING → LABOR",
+    ),
+    (
+        tt2,
+        "labor_to_household",
+        "LABOR → HOUSEHOLD",
+    ),
+    (
+        tt3,
+        "coincident_to_2y",
+        "COINCIDENT → US 2Y",
+    ),
+):
+    item = transition_models.get(
+        key,
+        {},
+    )
+
+    with column:
+        metric_card(
+            label,
+            item.get(
+                "state",
+                "N/V",
+            ),
+            item.get(
+                "interpretation",
+                "keine Transition-Diagnose verfügbar",
+            ),
+        )
+
+family_rows = []
+
+for key in (
+    "labor_quality",
+    "housing_activity",
+    "household_resilience",
+):
+    item = macro_families.get(
+        key,
+        {},
+    )
+
+    family_rows.append(
+        {
+            "Macro Family": item.get(
+                "label",
+                key,
+            ),
+            "State": item.get(
+                "state",
+                "N/V",
+            ),
+            "Positive": item.get(
+                "positive_components",
+                0,
+            ),
+            "Negative": item.get(
+                "negative_components",
+                0,
+            ),
+            "Available": item.get(
+                "available_components",
+                0,
+            ),
+            "Role": item.get(
+                "role",
+                "DIAGNOSTIC_ONLY_NO_CYCLE_VOTE",
+            ),
+        }
+    )
+
+st.dataframe(
+    pd.DataFrame(
+        family_rows
+    ),
+    use_container_width=True,
+    hide_index=True,
+)
+
+with st.expander(
+    "Transition & Macro Family Details",
+    expanded=False,
+):
+    component_rows = []
+
+    for family_key, family_item in macro_families.items():
+        for component in family_item.get(
+            "components",
+            [],
+        ):
+            direction = component.get(
+                "direction"
+            )
+
+            component_rows.append(
+                {
+                    "Family": family_item.get(
+                        "label",
+                        family_key,
+                    ),
+                    "Component": component.get(
+                        "label",
+                        "",
+                    ),
+                    "Level": component.get(
+                        "value"
+                    ),
+                    "Change": component.get(
+                        "change"
+                    ),
+                    "Direction": (
+                        "POSITIVE"
+                        if direction == 1
+                        else (
+                            "NEGATIVE"
+                            if direction == -1
+                            else (
+                                "NEUTRAL"
+                                if direction == 0
+                                else "CONTEXT"
+                            )
+                        )
+                    ),
+                    "Change Unit": component.get(
+                        "change_unit",
+                        "",
+                    ),
+                    "Note": component.get(
+                        "note",
+                        "",
+                    ),
+                }
+            )
+
+    if component_rows:
+        st.dataframe(
+            pd.DataFrame(
+                component_rows
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    transition_rows = []
+
+    for item in transition_models.values():
+        transition_rows.append(
+            {
+                "Transition": item.get(
+                    "label",
+                    "",
+                ),
+                "State": item.get(
+                    "state",
+                    "N/V",
+                ),
+                "Interpretation": item.get(
+                    "interpretation",
+                    "",
+                ),
+                "Role": item.get(
+                    "role",
+                    "TRANSITION_DIAGNOSTIC_ONLY",
+                ),
+            }
+        )
+
+    if transition_rows:
+        st.dataframe(
+            pd.DataFrame(
+                transition_rows
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+st.caption(
+    "Wichtig: Diese neuen Familien verändern die produktive Business-Cycle-Phase bewusst nicht. "
+    "Sie sollen die Sequenz sichtbar machen: Housing kann Labor führen, Labor kann auf Household Demand übertragen, "
+    "und Coincident Growth kann dem US 2Y vorauslaufen. Erst nach historischer Robustheitsprüfung würden wir daraus "
+    "kalibrierte Transition-Regeln ableiten."
+)
 
 
 section_line(

@@ -73,6 +73,8 @@ class MacroNavigationResult:
     imminent_recession: dict[str, Any]
     model_breadth: dict[str, Any]
     liquidity_modifier: dict[str, Any]
+    transition_models: dict[str, Any]
+    macro_families: dict[str, Any]
 
     atomic_models: list[dict[str, Any]]
     family_consensus: list[dict[str, Any]]

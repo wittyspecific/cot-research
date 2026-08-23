@@ -43,12 +43,22 @@ def test_dashboard_no_longer_loads_alignment_scan_helpers():
 def test_dashboard_keeps_requested_quick_access_order():
     text = DASH.read_text(encoding="utf-8")
 
-    trade = text.index('st.page_link("pages/trade_planner.py"')
-    watch = text.index('st.page_link("pages/watchlist.py"')
-    intermarket = text.index('st.page_link("pages/intermarket.py"')
-    currency = text.index('st.page_link("pages/forex_matrix.py"')
+    trade = text.index(
+        'st.page_link("pages/trade_planner.py"'
+    )
+    scanner = text.index(
+        'st.page_link("pages/opportunity_scanner.py"'
+    )
+    market = text.index(
+        'st.page_link("pages/market_analysis_hub.py"'
+    )
+    currency = text.index(
+        'st.page_link("pages/currency_strength_hub.py"'
+    )
 
-    assert trade < watch < intermarket < currency
+    # V3.29.x trader workflow:
+    # execution planning -> discovery -> market thesis -> relative FX.
+    assert trade < scanner < market < currency
 
 
 def test_visible_product_brand_is_quant_research():

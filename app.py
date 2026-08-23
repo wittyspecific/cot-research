@@ -21,6 +21,8 @@ from src.style import apply_style
 from src.trade_journal import initialize_journal, resolve_db_path
 from src.trader_auth import authenticate_trader, create_trader, get_trader, trader_count
 
+from src.trader_theme import apply_trader_dark_theme
+
 APP_VERSION = "3.10.0"
 
 st.set_page_config(
@@ -29,6 +31,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+apply_trader_dark_theme()
 apply_style()
 
 
@@ -203,19 +207,10 @@ pages: dict[str, list] = {
         st.Page("pages/dashboard.py", title="Dashboard", icon=":material/home:", default=True),
     ],
     "RESEARCH": [
-        st.Page("pages/watchlist.py", title="Watchlist", icon=":material/radar:"),
-        st.Page("pages/intermarket.py", title="Intermarket", icon=":material/hub:"),
-        st.Page("pages/marktanalyse.py", title="Marktanalyse", icon=":material/query_stats:"),
-        st.Page("pages/forex_matrix.py", title="Währungsstärke", icon=":material/currency_exchange:"),
-        st.Page("pages/yield_spreads.py", title="Yield Spreads", icon=":material/show_chart:"),
-        st.Page("pages/macro_model_library.py", title="Makro Model Library", icon=":material/public:"),
-        st.Page("pages/cot_price_analog.py", title="COT × Price Analog", icon=":material/history:"),
-        st.Page("pages/fx_relative_cot_analog.py", title="FX Relative COT Analog", icon=":material/currency_exchange:"),
-        st.Page("pages/market_regime.py", title="Market Regime", icon=":material/public:"),
-        st.Page("pages/volatility_regime.py", title="Volatility Regime", icon=":material/show_chart:"),
-        st.Page("pages/credit_stress.py", title="Credit Stress", icon=":material/account_balance:"),
-        st.Page("pages/seasonality_edge_lab.py", title="Seasonality Edge Lab", icon=":material/calendar_month:"),
-        st.Page("pages/cot_x_seasonality.py", title="COT × Seasonality", icon=":material/join_inner:"),
+        st.Page("pages/opportunity_scanner.py", title="Opportunity Scanner", icon=":material/radar:"),
+        st.Page("pages/market_analysis_hub.py", title="Marktanalyse", icon=":material/analytics:"),
+        st.Page("pages/currency_strength_hub.py", title="Währungsstärke", icon=":material/currency_exchange:"),
+        st.Page("pages/macro_regime.py", title="Makro-Regime", icon=":material/public:"),
     ],
     "TRADING": [
         st.Page("pages/trade_planner.py", title="Neuer Trade", icon=":material/add_circle:"),
@@ -230,9 +225,22 @@ pages: dict[str, list] = {
         st.Page("pages/fx_lab.py", title="FX Lab", icon=":material/currency_exchange:"),
         st.Page("pages/intermarket_lab.py", title="Intermarket Lab", icon=":material/hub:"),
         st.Page("pages/yield_x_cot.py", title="Yield x COT", icon=":material/science:"),
-        st.Page("pages/yield_spreads.py", title="Yield Spreads", icon=":material/show_chart:"),
+        st.Page("pages/yield_spreads.py", title="Zinskurven", icon=":material/show_chart:"),
         st.Page("pages/datenmodell.py", title="CFTC Datenmodell", icon=":material/database:"),
-        st.Page("pages/analog_diagnostics.py", title="Analog Diagnostics", icon=":material/tune:"),
+        st.Page("pages/analog_diagnostics.py", title="Analog-Diagnostik", icon=":material/tune:"),
+        st.Page("pages/advanced_market_regime.py", title="Marktregime", icon=":material/public:"),
+        st.Page("pages/advanced_credit_stress.py", title="Kreditstress", icon=":material/account_balance:"),
+        st.Page("pages/advanced_seasonality_edge_lab.py", title="Saisonalitäts-Labor", icon=":material/calendar_month:"),
+        st.Page("pages/advanced_legacy_watchlist.py", title="Beobachtungsliste", icon=":material/radar:"),
+        st.Page("pages/advanced_legacy_intermarket.py", title="Intermarket", icon=":material/hub:"),
+        st.Page("pages/advanced_legacy_macro_model_library.py", title="Makro-Zyklus", icon=":material/public:"),
+        st.Page("pages/advanced_legacy_macro_cot_regime.py", title="Makro × COT", icon=":material/compare_arrows:"),
+        st.Page("pages/advanced_legacy_cot_price_analog.py", title="COT × Preis-Analog", icon=":material/history:"),
+        st.Page("pages/advanced_legacy_fx_relative_cot_analog.py", title="FX-COT-Analog", icon=":material/currency_exchange:"),
+        st.Page("pages/advanced_legacy_volatility_regime.py", title="Volatilität", icon=":material/show_chart:"),
+        st.Page("pages/advanced_legacy_cot_x_seasonality.py", title="COT × Saisonalität", icon=":material/join_inner:"),
+        st.Page("pages/advanced_legacy_marktanalyse.py", title="Marktanalyse", icon=":material/query_stats:"),
+        st.Page("pages/advanced_legacy_forex_matrix.py", title="Währungsstärke", icon=":material/currency_exchange:"),
     ],
 }
 
@@ -253,7 +261,7 @@ if not is_admin:
 # V3.19.4 · REMOVE LEGACY RESEARCH YIELD PAGE BEFORE NAVIGATION
 pages["RESEARCH"] = [
     page for page in pages.get("RESEARCH", [])
-    if getattr(page, "title", None) != "Yield Spreads"
+    if getattr(page, "title", None) not in {"Yield Spreads", "Zinskurven"}
 ]
 
 page = st.navigation(pages, position="sidebar")
