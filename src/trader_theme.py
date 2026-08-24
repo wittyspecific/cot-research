@@ -351,3 +351,600 @@ def _v32920_table_contrast_overlay() -> None:
 def apply_trader_dark_theme() -> None:
     _v32920_base_apply_trader_dark_theme()
     _v32920_table_contrast_overlay()
+
+# V3.29.5 · UNIFIED DARK SURFACE THEME
+_v32950_base_apply_trader_dark_theme = apply_trader_dark_theme
+
+
+def _v32950_unified_trader_surface_overlay() -> None:
+    st.markdown(
+        """
+        <style>
+        :root {
+            --qa-bg: #0B0F14;
+            --qa-surface: #0B0F14;
+            --qa-control: #111923;
+            --qa-control-hover: #151F2A;
+            --qa-border: #29333E;
+            --qa-border-soft: #202A34;
+            --qa-text: #F3F6FB;
+            --qa-text-soft: #C4CDD7;
+            --qa-muted: #8F9BAA;
+            --qa-blue: #62A6C9;
+        }
+
+        [data-testid="stAppViewContainer"],
+        [data-testid="stMain"],
+        [data-testid="stMainBlockContainer"] {
+            background: var(--qa-bg) !important;
+            background-color: var(--qa-bg) !important;
+            color: var(--qa-text) !important;
+        }
+
+        [data-testid="stAppViewContainer"] h1 {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        [data-testid="stAppViewContainer"] h2,
+        [data-testid="stAppViewContainer"] h3,
+        [data-testid="stAppViewContainer"] h4,
+        [class*="kicker"],
+        [class*="eyebrow"],
+        [class*="section-title"],
+        [class*="section_title"],
+        [class*="overline"] {
+            color: var(--qa-blue) !important;
+            -webkit-text-fill-color: var(--qa-blue) !important;
+        }
+
+        [data-testid="stAppViewContainer"] p,
+        [data-testid="stAppViewContainer"] label,
+        [data-testid="stAppViewContainer"] li {
+            color: var(--qa-text) !important;
+        }
+
+        [data-testid="stCaptionContainer"],
+        [data-testid="stCaptionContainer"] *,
+        small,
+        [class*="subtitle"],
+        [class*="meta"] {
+            color: var(--qa-muted) !important;
+            -webkit-text-fill-color: var(--qa-muted) !important;
+        }
+
+        /* New research cards: same background as page, hierarchy through border */
+        .trader-card,
+        .research-card,
+        .state-card,
+        .signal-card,
+        .metric-card,
+        .summary-card {
+            background: var(--qa-surface) !important;
+            background-color: var(--qa-surface) !important;
+            border: 1px solid var(--qa-border) !important;
+            box-shadow: none !important;
+            color: var(--qa-text) !important;
+        }
+
+        .trader-card *,
+        .research-card *,
+        .state-card *,
+        .signal-card *,
+        .metric-card *,
+        .summary-card * {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        /* Remove any remaining explicit white surfaces in research pages */
+        [data-testid="stAppViewContainer"] [style*="background: white"],
+        [data-testid="stAppViewContainer"] [style*="background:white"],
+        [data-testid="stAppViewContainer"] [style*="background-color: white"],
+        [data-testid="stAppViewContainer"] [style*="background-color:white"],
+        [data-testid="stAppViewContainer"] [style*="background: #fff"],
+        [data-testid="stAppViewContainer"] [style*="background:#fff"],
+        [data-testid="stAppViewContainer"] [style*="background: #ffffff"],
+        [data-testid="stAppViewContainer"] [style*="background:#ffffff"],
+        [data-testid="stAppViewContainer"] [style*="background: #FFFFFF"],
+        [data-testid="stAppViewContainer"] [style*="background:#FFFFFF"] {
+            background: var(--qa-surface) !important;
+            background-color: var(--qa-surface) !important;
+            color: var(--qa-text) !important;
+            border-color: var(--qa-border) !important;
+            box-shadow: none !important;
+        }
+
+        [data-testid="stAppViewContainer"] [style*="background: white"] *,
+        [data-testid="stAppViewContainer"] [style*="background:white"] *,
+        [data-testid="stAppViewContainer"] [style*="background-color: white"] *,
+        [data-testid="stAppViewContainer"] [style*="background-color:white"] *,
+        [data-testid="stAppViewContainer"] [style*="background: #fff"] *,
+        [data-testid="stAppViewContainer"] [style*="background:#fff"] *,
+        [data-testid="stAppViewContainer"] [style*="background: #ffffff"] *,
+        [data-testid="stAppViewContainer"] [style*="background:#ffffff"] *,
+        [data-testid="stAppViewContainer"] [style*="background: #FFFFFF"] *,
+        [data-testid="stAppViewContainer"] [style*="background:#FFFFFF"] * {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        [data-testid="stBaseButton-secondary"],
+        [data-testid="stPageLink"] a {
+            background: var(--qa-surface) !important;
+            background-color: var(--qa-surface) !important;
+            color: var(--qa-text) !important;
+            border: 1px solid var(--qa-border) !important;
+            box-shadow: none !important;
+        }
+
+        [data-testid="stBaseButton-secondary"] *,
+        [data-testid="stPageLink"] a * {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        [data-testid="stTextInput"] div[data-baseweb="input"],
+        [data-testid="stTextInput"] input,
+        [data-testid="stNumberInput"] div[data-baseweb="input"],
+        [data-testid="stNumberInput"] input,
+        [data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+        [data-testid="stMultiSelect"] div[data-baseweb="select"] > div {
+            background: var(--qa-control) !important;
+            background-color: var(--qa-control) !important;
+            color: var(--qa-text) !important;
+            border-color: var(--qa-border) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+            box-shadow: none !important;
+        }
+
+        [data-testid="stSelectbox"] div[data-baseweb="select"] *,
+        [data-testid="stMultiSelect"] div[data-baseweb="select"] *,
+        [data-testid="stTextInput"] input,
+        [data-testid="stNumberInput"] input {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        div[data-baseweb="popover"],
+        div[data-baseweb="menu"],
+        ul[role="listbox"],
+        [role="option"] {
+            background: var(--qa-control) !important;
+            background-color: var(--qa-control) !important;
+            color: var(--qa-text) !important;
+        }
+
+        [role="option"]:hover,
+        [role="option"][aria-selected="true"] {
+            background: var(--qa-control-hover) !important;
+            background-color: var(--qa-control-hover) !important;
+        }
+
+        [data-testid="stExpander"],
+        [data-testid="stForm"],
+        [data-testid="stVerticalBlockBorderWrapper"] > div {
+            background: var(--qa-surface) !important;
+            background-color: var(--qa-surface) !important;
+            border-color: var(--qa-border) !important;
+            box-shadow: none !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def apply_trader_dark_theme() -> None:
+    _v32950_base_apply_trader_dark_theme()
+    _v32950_unified_trader_surface_overlay()
+
+# V3.30.0 · HEDGE FUND UI FOUNDATION
+_v3300_base_apply_trader_dark_theme = apply_trader_dark_theme
+
+
+def apply_trader_dark_theme() -> None:
+    _v3300_base_apply_trader_dark_theme()
+
+    from src.ui.hedgefund import apply_hedgefund_theme
+
+    apply_hedgefund_theme()
+
+# V3.30.1 · VISIBLE HEDGE FUND COMPONENT MIGRATION
+_v3301_base_apply_trader_dark_theme = apply_trader_dark_theme
+
+
+def _v3301_visible_component_css() -> None:
+    st.markdown(
+        """
+        <style>
+        /* ---------------------------------------------------------
+           V3.30.1 visible institutional shell
+           --------------------------------------------------------- */
+        [data-testid="stMainBlockContainer"] {
+            max-width: 1540px !important;
+            padding-top: 1.4rem !important;
+            padding-left: 2rem !important;
+            padding-right: 2rem !important;
+        }
+
+        [data-testid="stSidebar"] {
+            background:
+                linear-gradient(
+                    180deg,
+                    #07101A 0%,
+                    #09131D 55%,
+                    #081018 100%
+                ) !important;
+            border-right: 1px solid #1B2A38 !important;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stPageLink"] a {
+            min-height: 42px !important;
+            padding: .48rem .72rem !important;
+            border-radius: 8px !important;
+            transition:
+                background .15s ease,
+                border-color .15s ease,
+                color .15s ease !important;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stPageLink"] a:hover {
+            background: #0E1A26 !important;
+            border-color: #223849 !important;
+        }
+
+        [data-testid="stSidebar"] [aria-current="page"],
+        [data-testid="stSidebar"] a[aria-current="page"] {
+            background:
+                linear-gradient(
+                    90deg,
+                    rgba(98,166,201,.17),
+                    rgba(98,166,201,.045)
+                ) !important;
+            color: #F3F6FB !important;
+            border-color: rgba(98,166,201,.34) !important;
+            box-shadow:
+                inset 3px 0 0 #62A6C9 !important;
+        }
+
+        /* ---------------------------------------------------------
+           Hedge-fund page header
+           --------------------------------------------------------- */
+        .hf330-page-head {
+            position: relative;
+            margin: 0 0 1.15rem 0;
+            padding: .4rem 0 1rem 0;
+            border-bottom: 1px solid #1A2835;
+        }
+
+        .hf330-page-head::after {
+            content: "";
+            position: absolute;
+            bottom: -1px;
+            left: 0;
+            width: 76px;
+            height: 1px;
+            background:
+                linear-gradient(
+                    90deg,
+                    #62A6C9,
+                    rgba(98,166,201,0)
+                );
+        }
+
+        .hf330-kicker {
+            color: #62A6C9 !important;
+            font-size: .70rem;
+            font-weight: 800;
+            line-height: 1.2;
+            letter-spacing: .16em;
+            text-transform: uppercase;
+            margin-bottom: .48rem;
+        }
+
+        .hf330-title {
+            color: #F3F6FB !important;
+            font-size: clamp(1.8rem, 2.5vw, 2.65rem);
+            font-weight: 780;
+            line-height: 1.02;
+            letter-spacing: -.034em;
+            margin: 0;
+        }
+
+        .hf330-subtitle {
+            color: #95A3B3 !important;
+            font-size: .94rem;
+            line-height: 1.55;
+            max-width: 940px;
+            margin-top: .6rem;
+        }
+
+        /* ---------------------------------------------------------
+           Institutional data card
+           --------------------------------------------------------- */
+        .hf330-card {
+            position: relative;
+            min-height: 112px;
+            padding: .95rem 1rem .9rem 1rem;
+            border: 1px solid #22303D;
+            border-radius: 10px;
+            background:
+                radial-gradient(
+                    circle at 100% 0%,
+                    rgba(98,166,201,.055),
+                    transparent 38%
+                ),
+                linear-gradient(
+                    180deg,
+                    rgba(17,29,41,.98),
+                    rgba(13,23,34,.98)
+                );
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,.025),
+                0 12px 28px rgba(0,0,0,.14);
+            overflow: hidden;
+        }
+
+        .hf330-card::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--hf330-accent, #62A6C9);
+            opacity: .78;
+        }
+
+        .hf330-card-label {
+            color: #95A3B3 !important;
+            font-size: .66rem;
+            font-weight: 800;
+            letter-spacing: .115em;
+            text-transform: uppercase;
+            margin-bottom: .55rem;
+        }
+
+        .hf330-card-value {
+            color: var(--hf330-accent, #F3F6FB) !important;
+            font-size: 1.16rem;
+            line-height: 1.18;
+            font-weight: 780;
+            letter-spacing: -.01em;
+            word-break: break-word;
+        }
+
+        .hf330-card-note {
+            color: #95A3B3 !important;
+            font-size: .74rem;
+            line-height: 1.38;
+            margin-top: .5rem;
+        }
+
+        .hf330-card-note:empty {
+            display: none;
+        }
+
+        /* ---------------------------------------------------------
+           Thesis / summary bar
+           --------------------------------------------------------- */
+        .hf330-summary {
+            position: relative;
+            display: flex;
+            gap: .72rem;
+            align-items: flex-start;
+            background:
+                linear-gradient(
+                    90deg,
+                    rgba(98,166,201,.075),
+                    rgba(13,23,34,.88) 28%,
+                    rgba(13,23,34,.88)
+                );
+            border: 1px solid #22303D;
+            border-radius: 10px;
+            color: #D8E0E9 !important;
+            padding: .85rem 1rem;
+            margin: .72rem 0 1.05rem 0;
+            line-height: 1.52;
+            font-size: .88rem;
+        }
+
+        .hf330-summary::before {
+            content: "◈";
+            color: #62A6C9;
+            flex: 0 0 auto;
+            font-size: .94rem;
+            margin-top: .03rem;
+        }
+
+        /* ---------------------------------------------------------
+           Make Streamlit bordered containers look like mockup panels
+           --------------------------------------------------------- */
+        [data-testid="stVerticalBlockBorderWrapper"] > div {
+            background:
+                linear-gradient(
+                    180deg,
+                    rgba(17,29,41,.72),
+                    rgba(13,23,34,.72)
+                ) !important;
+            border: 1px solid #22303D !important;
+            border-radius: 10px !important;
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,.02) !important;
+        }
+
+        /* Tabs closer to mockup */
+        [data-baseweb="tab-list"] {
+            min-height: 42px !important;
+            gap: 1.25rem !important;
+            border-bottom: 1px solid #22303D !important;
+        }
+
+        [data-baseweb="tab"] {
+            font-size: .82rem !important;
+            font-weight: 680 !important;
+            padding: .55rem 0 .65rem !important;
+        }
+
+        /* Dataframes get less rounded / more terminal-like */
+        [data-testid="stDataFrame"] {
+            border-radius: 8px !important;
+            border-color: #22303D !important;
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,.015) !important;
+        }
+
+        /* Expander as institutional utility row */
+        [data-testid="stExpander"] {
+            border-radius: 8px !important;
+            background: #0D1722 !important;
+            border-color: #22303D !important;
+        }
+
+        /* Form / select controls */
+        [data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+        [data-testid="stMultiSelect"] div[data-baseweb="select"] > div,
+        [data-testid="stTextInput"] div[data-baseweb="input"],
+        [data-testid="stNumberInput"] div[data-baseweb="input"] {
+            min-height: 40px !important;
+            border-radius: 8px !important;
+            background: #0D1722 !important;
+            border-color: #22303D !important;
+        }
+
+        .stButton > button {
+            min-height: 38px !important;
+            border-radius: 8px !important;
+            font-weight: 700 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def apply_trader_dark_theme() -> None:
+    _v3301_base_apply_trader_dark_theme()
+    _v3301_visible_component_css()
+
+
+def _v3301_tone_color(
+    value: Any,
+    tone: str | None = None,
+) -> str:
+    resolved = str(
+        tone or tone_for(value)
+    ).lower()
+
+    return {
+        "positive": "#65D98B",
+        "negative": "#FF7373",
+        "warning": "#F2B84B",
+        "info": "#62A6C9",
+        "transition": "#79B8FF",
+        "purple": "#B59BFF",
+        "muted": "#7F8B99",
+        "neutral": "#F3F6FB",
+    }.get(
+        resolved,
+        "#F3F6FB",
+    )
+
+
+def render_page_header(
+    kicker: str,
+    title: str,
+    subtitle: str,
+) -> None:
+    st.markdown(
+        (
+            '<div class="hf330-page-head">'
+            f'<div class="hf330-kicker">{escape(str(kicker))}</div>'
+            f'<div class="hf330-title">{escape(str(title))}</div>'
+            f'<div class="hf330-subtitle">{escape(str(subtitle or ""))}</div>'
+            '</div>'
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def render_card(
+    label: str,
+    value: Any,
+    note: str = "",
+    *,
+    tone: str | None = None,
+) -> None:
+    accent = _v3301_tone_color(
+        value,
+        tone,
+    )
+
+    display = (
+        "—"
+        if value in (
+            None,
+            "",
+        )
+        else str(value)
+    )
+
+    st.markdown(
+        (
+            '<div class="hf330-card" '
+            f'style="--hf330-accent:{accent}">'
+            f'<div class="hf330-card-label">{escape(str(label))}</div>'
+            f'<div class="hf330-card-value">{escape(display)}</div>'
+            f'<div class="hf330-card-note">{escape(str(note or ""))}</div>'
+            '</div>'
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def render_summary(
+    text: str,
+) -> None:
+    st.markdown(
+        (
+            '<div class="hf330-summary">'
+            f'{escape(str(text or ""))}'
+            '</div>'
+        ),
+        unsafe_allow_html=True,
+    )
+
+# V3.30.2 · FULL HEDGE FUND UI MIGRATION
+_v3302_base_apply_trader_dark_theme = apply_trader_dark_theme
+
+
+def apply_trader_dark_theme() -> None:
+    _v3302_base_apply_trader_dark_theme()
+
+    from src.ui.hedgefund import apply_hedgefund_theme
+
+    apply_hedgefund_theme()
+
+
+def render_page_header(kicker, title, subtitle) -> None:
+    from src.ui.hedgefund import render_page_header as _hf_render_page_header
+
+    _hf_render_page_header(kicker, title, subtitle)
+
+
+def render_card(label, value, note="", *, tone=None) -> None:
+    from src.ui.hedgefund import render_card as _hf_render_card
+
+    _hf_render_card(
+        label,
+        value,
+        note,
+        tone=tone,
+    )
+
+
+def render_summary(text) -> None:
+    from src.ui.hedgefund import render_summary as _hf_render_summary
+
+    _hf_render_summary(text)

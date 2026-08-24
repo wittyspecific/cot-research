@@ -23,6 +23,13 @@ from src.trader_auth import authenticate_trader, create_trader, get_trader, trad
 
 from src.trader_theme import apply_trader_dark_theme
 
+# V3.30.2 · POST RENDER THEME
+def _v3302_apply_post_render_theme() -> None:
+    from src.ui.hedgefund import apply_hedgefund_theme
+
+    apply_hedgefund_theme()
+
+
 APP_VERSION = "3.10.0"
 
 st.set_page_config(
@@ -266,3 +273,4 @@ pages["RESEARCH"] = [
 
 page = st.navigation(pages, position="sidebar")
 page.run()
+_v3302_apply_post_render_theme()

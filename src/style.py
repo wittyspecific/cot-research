@@ -1228,3 +1228,516 @@ def _v32940_watchlist_dark_overlay() -> None:
 def apply_style() -> None:
     _v32940_base_apply_style()
     _v32940_watchlist_dark_overlay()
+
+# V3.29.5 · UNIFIED DARK SURFACE THEME
+_v32950_base_apply_style = apply_style
+
+
+def _v32950_unified_dark_surface_overlay() -> None:
+    st.markdown(
+        """
+        <style>
+        :root {
+            --qa-bg: #0B0F14;
+            --qa-surface: #0B0F14;
+            --qa-control: #111923;
+            --qa-control-hover: #151F2A;
+            --qa-border: #29333E;
+            --qa-border-soft: #202A34;
+            --qa-text: #F3F6FB;
+            --qa-text-soft: #C4CDD7;
+            --qa-muted: #8F9BAA;
+            --qa-blue: #62A6C9;
+            --qa-blue-soft: #7DC3E5;
+        }
+
+        /*
+        Core visual rule:
+        page/background surfaces stay dark; information is separated by
+        borders and spacing instead of white cards.
+        */
+        html,
+        body,
+        [data-testid="stAppViewContainer"],
+        [data-testid="stMain"],
+        [data-testid="stMainBlockContainer"],
+        [data-testid="stSidebar"],
+        [data-testid="stSidebarContent"] {
+            background: var(--qa-bg) !important;
+            background-color: var(--qa-bg) !important;
+            color: var(--qa-text) !important;
+        }
+
+        /* Normal readable text */
+        [data-testid="stAppViewContainer"] p,
+        [data-testid="stAppViewContainer"] li,
+        [data-testid="stAppViewContainer"] span,
+        [data-testid="stAppViewContainer"] label,
+        [data-testid="stSidebar"] p,
+        [data-testid="stSidebar"] li,
+        [data-testid="stSidebar"] span,
+        [data-testid="stSidebar"] label {
+            color: var(--qa-text) !important;
+        }
+
+        /*
+        Primary page titles remain off-white for maximum legibility.
+        Section headings / eyebrow labels carry the blue research accent.
+        */
+        [data-testid="stAppViewContainer"] h1,
+        [data-testid="stSidebar"] h1 {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        [data-testid="stAppViewContainer"] h2,
+        [data-testid="stAppViewContainer"] h3,
+        [data-testid="stAppViewContainer"] h4,
+        [data-testid="stSidebar"] h2,
+        [data-testid="stSidebar"] h3,
+        [data-testid="stSidebar"] h4 {
+            color: var(--qa-blue) !important;
+            -webkit-text-fill-color: var(--qa-blue) !important;
+        }
+
+        /* Common custom heading / kicker names used across the project */
+        [class*="kicker"],
+        [class*="eyebrow"],
+        [class*="section-title"],
+        [class*="section_title"],
+        [class*="overline"] {
+            color: var(--qa-blue) !important;
+            -webkit-text-fill-color: var(--qa-blue) !important;
+        }
+
+        /* Quant Research / custom brand title */
+        [class*="brand"] strong,
+        [class*="brand-title"],
+        [class*="brand_title"],
+        [class*="logo-title"],
+        [class*="logo_title"],
+        [class*="app-title"],
+        [class*="app_title"] {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        /* Secondary / caption text remains visible but quieter */
+        [data-testid="stCaptionContainer"],
+        [data-testid="stCaptionContainer"] *,
+        small,
+        .muted,
+        [class*="subtitle"],
+        [class*="meta"] {
+            color: var(--qa-muted) !important;
+            -webkit-text-fill-color: var(--qa-muted) !important;
+        }
+
+        /*
+        Remove legacy white flat surfaces globally.
+        These selectors intentionally run AFTER previous theme layers.
+        */
+        [data-testid="stAppViewContainer"] [style*="background: white"],
+        [data-testid="stAppViewContainer"] [style*="background:white"],
+        [data-testid="stAppViewContainer"] [style*="background-color: white"],
+        [data-testid="stAppViewContainer"] [style*="background-color:white"],
+        [data-testid="stAppViewContainer"] [style*="background: #fff"],
+        [data-testid="stAppViewContainer"] [style*="background:#fff"],
+        [data-testid="stAppViewContainer"] [style*="background: #ffffff"],
+        [data-testid="stAppViewContainer"] [style*="background:#ffffff"],
+        [data-testid="stAppViewContainer"] [style*="background: #FFFFFF"],
+        [data-testid="stAppViewContainer"] [style*="background:#FFFFFF"],
+        [data-testid="stSidebar"] [style*="background: white"],
+        [data-testid="stSidebar"] [style*="background:white"],
+        [data-testid="stSidebar"] [style*="background-color: white"],
+        [data-testid="stSidebar"] [style*="background-color:white"],
+        [data-testid="stSidebar"] [style*="background: #fff"],
+        [data-testid="stSidebar"] [style*="background:#fff"],
+        [data-testid="stSidebar"] [style*="background: #ffffff"],
+        [data-testid="stSidebar"] [style*="background:#ffffff"],
+        [data-testid="stSidebar"] [style*="background: #FFFFFF"],
+        [data-testid="stSidebar"] [style*="background:#FFFFFF"] {
+            background: var(--qa-surface) !important;
+            background-color: var(--qa-surface) !important;
+            color: var(--qa-text) !important;
+            border-color: var(--qa-border) !important;
+            box-shadow: none !important;
+        }
+
+        [data-testid="stAppViewContainer"] [style*="background: white"] *,
+        [data-testid="stAppViewContainer"] [style*="background:white"] *,
+        [data-testid="stAppViewContainer"] [style*="background-color: white"] *,
+        [data-testid="stAppViewContainer"] [style*="background-color:white"] *,
+        [data-testid="stAppViewContainer"] [style*="background: #fff"] *,
+        [data-testid="stAppViewContainer"] [style*="background:#fff"] *,
+        [data-testid="stAppViewContainer"] [style*="background: #ffffff"] *,
+        [data-testid="stAppViewContainer"] [style*="background:#ffffff"] *,
+        [data-testid="stAppViewContainer"] [style*="background: #FFFFFF"] *,
+        [data-testid="stAppViewContainer"] [style*="background:#FFFFFF"] *,
+        [data-testid="stSidebar"] [style*="background: white"] *,
+        [data-testid="stSidebar"] [style*="background:white"] *,
+        [data-testid="stSidebar"] [style*="background-color: white"] *,
+        [data-testid="stSidebar"] [style*="background-color:white"] *,
+        [data-testid="stSidebar"] [style*="background: #fff"] *,
+        [data-testid="stSidebar"] [style*="background:#fff"] *,
+        [data-testid="stSidebar"] [style*="background: #ffffff"] *,
+        [data-testid="stSidebar"] [style*="background:#ffffff"] *,
+        [data-testid="stSidebar"] [style*="background: #FFFFFF"] *,
+        [data-testid="stSidebar"] [style*="background:#FFFFFF"] * {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        /* Common custom cards: background = page, separation = border */
+        .metric-card,
+        .kpi-card,
+        .dashboard-card,
+        .stat-card,
+        .summary-card,
+        .user-card,
+        .admin-card,
+        .sidebar-card,
+        .sw-card,
+        .sw-legend,
+        .sw-table {
+            background: var(--qa-surface) !important;
+            background-color: var(--qa-surface) !important;
+            color: var(--qa-text) !important;
+            border: 1px solid var(--qa-border) !important;
+            box-shadow: none !important;
+        }
+
+        .metric-card *,
+        .kpi-card *,
+        .dashboard-card *,
+        .stat-card *,
+        .summary-card *,
+        .user-card *,
+        .admin-card *,
+        .sidebar-card *,
+        .sw-card *,
+        .sw-legend *,
+        .sw-table * {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        /*
+        Watchlist: remove the remaining white islands.
+        Keep colored chips only as restrained signal accents.
+        */
+        .sw-wrap {
+            color: var(--qa-text) !important;
+        }
+
+        .sw-kicker,
+        .sw-card-label {
+            color: var(--qa-blue) !important;
+            -webkit-text-fill-color: var(--qa-blue) !important;
+        }
+
+        .sw-title,
+        .sw-card-value,
+        .sw-market-name,
+        .sw-bias,
+        .sw-plan {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        .sw-subtitle,
+        .sw-legend-item,
+        .sw-market-code {
+            color: var(--qa-muted) !important;
+            -webkit-text-fill-color: var(--qa-muted) !important;
+        }
+
+        .sw-header {
+            background: #10161E !important;
+            background-color: #10161E !important;
+            color: var(--qa-text-soft) !important;
+            border-bottom: 1px solid var(--qa-border) !important;
+        }
+
+        .sw-row,
+        .sw-market,
+        .sw-market > div {
+            background: var(--qa-surface) !important;
+            background-color: var(--qa-surface) !important;
+        }
+
+        .sw-row {
+            border-top-color: var(--qa-border-soft) !important;
+        }
+
+        .sw-row:hover {
+            background: #0F171F !important;
+            background-color: #0F171F !important;
+        }
+
+        .sw-market-icon {
+            background: var(--qa-control) !important;
+            color: var(--qa-text) !important;
+        }
+
+        /*
+        Native Streamlit metrics:
+        no white tile, only a subtle border on the page background.
+        */
+        [data-testid="stMetric"] {
+            background: var(--qa-surface) !important;
+            background-color: var(--qa-surface) !important;
+            border: 1px solid var(--qa-border) !important;
+            border-radius: 12px !important;
+            box-shadow: none !important;
+        }
+
+        [data-testid="stMetric"] *,
+        [data-testid="stMetricLabel"],
+        [data-testid="stMetricValue"] {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        /*
+        Secondary buttons / page links:
+        same page background, border defines the control.
+        */
+        [data-testid="stBaseButton-secondary"],
+        [data-testid="stPageLink"] a,
+        [data-testid="stSidebar"] [data-testid="stButton"] button {
+            background: var(--qa-surface) !important;
+            background-color: var(--qa-surface) !important;
+            color: var(--qa-text) !important;
+            border: 1px solid var(--qa-border) !important;
+            box-shadow: none !important;
+        }
+
+        [data-testid="stBaseButton-secondary"] *,
+        [data-testid="stPageLink"] a *,
+        [data-testid="stSidebar"] [data-testid="stButton"] button * {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        [data-testid="stBaseButton-secondary"]:hover,
+        [data-testid="stPageLink"] a:hover,
+        [data-testid="stSidebar"] [data-testid="stButton"] button:hover {
+            background: var(--qa-control-hover) !important;
+            background-color: var(--qa-control-hover) !important;
+            border-color: rgba(98,166,201,.55) !important;
+        }
+
+        /*
+        Inputs need slight separation from the page to remain obvious.
+        They are dark, never white.
+        */
+        [data-testid="stTextInput"] div[data-baseweb="input"],
+        [data-testid="stTextInput"] div[data-baseweb="base-input"],
+        [data-testid="stTextInput"] input,
+        [data-testid="stNumberInput"] div[data-baseweb="input"],
+        [data-testid="stNumberInput"] input,
+        [data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+        [data-testid="stMultiSelect"] div[data-baseweb="select"] > div,
+        [data-testid="stDateInput"] div[data-baseweb="input"] {
+            background: var(--qa-control) !important;
+            background-color: var(--qa-control) !important;
+            color: var(--qa-text) !important;
+            border-color: var(--qa-border) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+            box-shadow: none !important;
+        }
+
+        [data-testid="stTextInput"] input,
+        [data-testid="stNumberInput"] input,
+        [data-testid="stSelectbox"] div[data-baseweb="select"] *,
+        [data-testid="stMultiSelect"] div[data-baseweb="select"] * {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        [data-testid="stTextInput"] input::placeholder,
+        [data-testid="stNumberInput"] input::placeholder {
+            color: var(--qa-muted) !important;
+            -webkit-text-fill-color: var(--qa-muted) !important;
+            opacity: 1 !important;
+        }
+
+        /* Dropdown menu itself */
+        div[data-baseweb="popover"],
+        div[data-baseweb="menu"],
+        ul[role="listbox"],
+        [role="option"] {
+            background: var(--qa-control) !important;
+            background-color: var(--qa-control) !important;
+            color: var(--qa-text) !important;
+        }
+
+        [role="option"] *,
+        div[data-baseweb="popover"] *,
+        div[data-baseweb="menu"] * {
+            color: var(--qa-text) !important;
+            -webkit-text-fill-color: var(--qa-text) !important;
+        }
+
+        [role="option"]:hover,
+        [role="option"][aria-selected="true"] {
+            background: var(--qa-control-hover) !important;
+            background-color: var(--qa-control-hover) !important;
+        }
+
+        /*
+        Expander / form / bordered containers:
+        transparent-to-page with a subtle border instead of a white slab.
+        */
+        [data-testid="stExpander"],
+        [data-testid="stForm"],
+        [data-testid="stVerticalBlockBorderWrapper"] > div {
+            background: var(--qa-surface) !important;
+            background-color: var(--qa-surface) !important;
+            border-color: var(--qa-border) !important;
+            box-shadow: none !important;
+        }
+
+        /*
+        Preserve primary CTA contrast (e.g. Login / explicit main action).
+        */
+        [data-testid="stBaseButton-primary"] {
+            background: var(--qa-blue) !important;
+            background-color: var(--qa-blue) !important;
+            color: #081018 !important;
+            border-color: var(--qa-blue) !important;
+        }
+
+        [data-testid="stBaseButton-primary"] * {
+            color: #081018 !important;
+            -webkit-text-fill-color: #081018 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def apply_style() -> None:
+    _v32950_base_apply_style()
+    _v32950_unified_dark_surface_overlay()
+
+# V3.30.0 · HEDGE FUND UI FOUNDATION
+_v3300_base_apply_style = apply_style
+
+
+def apply_style() -> None:
+    _v3300_base_apply_style()
+
+    from src.ui.hedgefund import apply_hedgefund_theme
+
+    apply_hedgefund_theme()
+
+# V3.30.1 · VISIBLE HEDGE FUND COMPONENT MIGRATION
+_v3301_base_apply_style = apply_style
+
+
+def _v3301_legacy_visible_shell() -> None:
+    st.markdown(
+        """
+        <style>
+        [data-testid="stMainBlockContainer"] {
+            max-width: 1540px !important;
+            padding-top: 1.4rem !important;
+            padding-left: 2rem !important;
+            padding-right: 2rem !important;
+        }
+
+        [data-testid="stSidebar"] {
+            background:
+                linear-gradient(
+                    180deg,
+                    #07101A 0%,
+                    #09131D 55%,
+                    #081018 100%
+                ) !important;
+            border-right: 1px solid #1B2A38 !important;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stPageLink"] a,
+        [data-testid="stSidebar"] [data-testid="stButton"] button {
+            min-height: 42px !important;
+            border-radius: 8px !important;
+        }
+
+        [data-testid="stSidebar"] [aria-current="page"],
+        [data-testid="stSidebar"] a[aria-current="page"] {
+            background:
+                linear-gradient(
+                    90deg,
+                    rgba(98,166,201,.17),
+                    rgba(98,166,201,.045)
+                ) !important;
+            border-color: rgba(98,166,201,.34) !important;
+            box-shadow:
+                inset 3px 0 0 #62A6C9 !important;
+        }
+
+        /*
+        Legacy custom cards should finally resemble the raised surfaces
+        from the visual mockups rather than flat Streamlit blocks.
+        */
+        .metric-card,
+        .kpi-card,
+        .dashboard-card,
+        .stat-card,
+        .summary-card,
+        .user-card,
+        .admin-card,
+        .sidebar-card {
+            background:
+                linear-gradient(
+                    180deg,
+                    rgba(17,29,41,.98),
+                    rgba(13,23,34,.98)
+                ) !important;
+            border: 1px solid #22303D !important;
+            border-radius: 10px !important;
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,.02),
+                0 12px 28px rgba(0,0,0,.13) !important;
+        }
+
+        [data-testid="stMetric"] {
+            background:
+                linear-gradient(
+                    180deg,
+                    rgba(17,29,41,.98),
+                    rgba(13,23,34,.98)
+                ) !important;
+            border: 1px solid #22303D !important;
+            border-radius: 10px !important;
+        }
+
+        [data-testid="stExpander"],
+        [data-testid="stForm"] {
+            background: #0D1722 !important;
+            border-color: #22303D !important;
+            border-radius: 8px !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def apply_style() -> None:
+    _v3301_base_apply_style()
+    _v3301_legacy_visible_shell()
+
+# V3.30.2 · FULL HEDGE FUND UI MIGRATION
+_v3302_base_apply_style = apply_style
+
+
+def apply_style() -> None:
+    _v3302_base_apply_style()
+
+    from src.ui.hedgefund import apply_hedgefund_theme
+
+    apply_hedgefund_theme()

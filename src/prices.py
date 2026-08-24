@@ -6,6 +6,109 @@ import streamlit as st
 import yfinance as yf
 
 
+# V3.30.6.2 · YFINANCE PRICE SHAPE REPAIR
+def _extract_yfinance_close_series(
+    frame: pd.DataFrame,
+    ticker: str,
+) -> pd.Series:
+    """
+    Extract exactly one close-price Series from yfinance output.
+
+    Supports flat columns, both MultiIndex orders and duplicate Close labels.
+    Positional selection avoids pandas returning a DataFrame for duplicate names.
+    """
+    if frame is None or frame.empty:
+        return pd.Series(dtype=float, name="close")
+
+    target = str(ticker or "")
+    fields = ("Adj Close", "Close")
+    selected_position = None
+
+    if isinstance(frame.columns, pd.MultiIndex):
+        columns = list(frame.columns)
+
+        for field in fields:
+            candidates = []
+
+            for position, column in enumerate(columns):
+                parts = tuple(
+                    str(part)
+                    for part in (
+                        column
+                        if isinstance(column, tuple)
+                        else (column,)
+                    )
+                )
+
+                if field not in parts:
+                    continue
+
+                ticker_match = bool(
+                    target
+                    and target in parts
+                )
+
+                candidates.append(
+                    (
+                        1 if ticker_match else 0,
+                        position,
+                    )
+                )
+
+            if candidates:
+                candidates.sort(
+                    key=lambda item: (
+                        -item[0],
+                        item[1],
+                    )
+                )
+                selected_position = int(
+                    candidates[0][1]
+                )
+                break
+
+    else:
+        flat_columns = [
+            str(column)
+            for column in frame.columns
+        ]
+
+        for field in fields:
+            positions = [
+                position
+                for position, column
+                in enumerate(flat_columns)
+                if column == field
+            ]
+
+            if positions:
+                selected_position = int(
+                    positions[0]
+                )
+                break
+
+    if selected_position is None:
+        return pd.Series(dtype=float, name="close")
+
+    series = frame.iloc[
+        :,
+        selected_position,
+    ].copy()
+
+    if isinstance(series, pd.DataFrame):
+        if series.shape[1] == 0:
+            return pd.Series(dtype=float, name="close")
+        series = series.iloc[:, 0]
+
+    series = pd.to_numeric(
+        series,
+        errors="coerce",
+    )
+
+    series.name = "close"
+    return series
+
+
 @st.cache_data(ttl=6 * 60 * 60, show_spinner=False)
 def load_prices(ticker: str, start) -> pd.DataFrame:
     """Load daily closes.
@@ -32,19 +135,54 @@ def load_prices(ticker: str, start) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame()
 
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [c[0] for c in df.columns]
+    close = _extract_yfinance_close_series(
+        df,
+        str(ticker),
+    )
 
-    close_col = "Adj Close" if "Adj Close" in df.columns else "Close"
-    if close_col not in df.columns:
+    if close.empty:
         return pd.DataFrame()
 
-    out = df[[close_col]].rename(columns={close_col: "close"}).copy()
-    out.index = pd.to_datetime(out.index)
-    if getattr(out.index, "tz", None) is not None:
-        out.index = out.index.tz_localize(None)
-    out["close"] = pd.to_numeric(out["close"], errors="coerce")
-    return out.dropna().sort_index()
+    out = close.to_frame(
+        name="close"
+    )
+
+    out.index = pd.to_datetime(
+        out.index,
+        errors="coerce",
+    )
+    out = out[
+        ~out.index.isna()
+    ]
+
+    if getattr(
+        out.index,
+        "tz",
+        None,
+    ) is not None:
+        out.index = out.index.tz_localize(
+            None
+        )
+
+    out["close"] = pd.to_numeric(
+        out["close"],
+        errors="coerce",
+    )
+
+    out = out[
+        ~out.index.duplicated(
+            keep="last"
+        )
+    ]
+
+    return (
+        out
+        .dropna(
+            subset=["close"]
+        )
+        .sort_index()
+    )
+
 
 
 def _same_iso_week(a, b) -> bool:
